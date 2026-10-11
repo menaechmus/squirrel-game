@@ -1,0 +1,102 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/hud.gd" id="1_script"]
+
+[node name="HUD" type="CanvasLayer"]
+layer = 2
+script = ExtResource("1_script")
+
+[node name="AcornLabel" type="Label" parent="."]
+offset_left = 24.0
+offset_top = 16.0
+offset_right = 324.0
+offset_bottom = 56.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+text = "Acorns: 0 / 0"
+
+[node name="TimeLabel" type="Label" parent="."]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -224.0
+offset_top = 16.0
+offset_right = -24.0
+offset_bottom = 56.0
+grow_horizontal = 0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+text = "0:00.0"
+horizontal_alignment = 2
+
+[node name="StartPanel" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.14, 0.08, 0.8)
+
+[node name="Center" type="CenterContainer" parent="StartPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="StartPanel/Center"]
+theme_override_constants/separation = 28
+
+[node name="Title" type="Label" parent="StartPanel/Center/VBox"]
+theme_override_font_sizes/font_size = 72
+text = "Squirrel Game"
+horizontal_alignment = 1
+
+[node name="Goal" type="Label" parent="StartPanel/Center/VBox"]
+text = "Find every acorn in the park as fast as you can."
+horizontal_alignment = 1
+
+[node name="Help" type="Label" parent="StartPanel/Center/VBox"]
+custom_minimum_size = Vector2(640, 0)
+theme_override_colors/font_color = Color(0.8, 0.88, 0.8, 1)
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="PlayButton" type="Button" parent="StartPanel/Center/VBox"]
+custom_minimum_size = Vector2(260, 90)
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 40
+text = "Play"
+
+[node name="WinPanel" type="ColorRect" parent="."]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.14, 0.08, 0.8)
+
+[node name="Center" type="CenterContainer" parent="WinPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="WinPanel/Center"]
+theme_override_constants/separation = 28
+
+[node name="Title" type="Label" parent="WinPanel/Center/VBox"]
+theme_override_font_sizes/font_size = 64
+text = "Winter is sorted!"
+horizontal_alignment = 1
+
+[node name="Result" type="Label" parent="WinPanel/Center/VBox"]
+horizontal_alignment = 1
+
+[node name="AgainButton" type="Button" parent="WinPanel/Center/VBox"]
+custom_minimum_size = Vector2(260, 90)
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 40
+text = "Play again"

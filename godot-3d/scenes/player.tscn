@@ -1,0 +1,149 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/player.gd" id="1_script"]
+
+[sub_resource type="CapsuleShape3D" id="shape"]
+radius = 0.3
+height = 0.9
+
+[sub_resource type="StandardMaterial3D" id="fur_mat"]
+albedo_color = Color(0.72, 0.36, 0.14, 1)
+roughness = 1.0
+
+[sub_resource type="StandardMaterial3D" id="belly_mat"]
+albedo_color = Color(0.95, 0.86, 0.72, 1)
+roughness = 1.0
+
+[sub_resource type="StandardMaterial3D" id="dark_mat"]
+albedo_color = Color(0.08, 0.06, 0.05, 1)
+roughness = 0.3
+
+[sub_resource type="SphereMesh" id="body_mesh"]
+radius = 0.25
+height = 0.62
+radial_segments = 12
+rings = 6
+
+[sub_resource type="SphereMesh" id="belly_mesh"]
+radius = 0.18
+height = 0.42
+radial_segments = 12
+rings = 6
+
+[sub_resource type="SphereMesh" id="head_mesh"]
+radius = 0.19
+height = 0.36
+radial_segments = 12
+rings = 6
+
+[sub_resource type="SphereMesh" id="snout_mesh"]
+radius = 0.09
+height = 0.16
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="dot_mesh"]
+radius = 0.035
+height = 0.07
+radial_segments = 8
+rings = 4
+
+[sub_resource type="CylinderMesh" id="ear_mesh"]
+top_radius = 0.0
+bottom_radius = 0.06
+height = 0.14
+radial_segments = 6
+
+[sub_resource type="CapsuleMesh" id="tail_mesh"]
+radius = 0.15
+height = 0.75
+radial_segments = 10
+rings = 4
+
+[sub_resource type="SphereMesh" id="tail_tip_mesh"]
+radius = 0.2
+height = 0.4
+radial_segments = 10
+rings = 5
+
+[node name="Player" type="CharacterBody3D" groups=["player"]]
+collision_layer = 2
+script = ExtResource("1_script")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.45, 0)
+shape = SubResource("shape")
+
+[node name="Model" type="Node3D" parent="."]
+rotation = Vector3(0, 3.14159, 0)
+
+[node name="Body" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.34, 0)
+rotation = Vector3(0.45, 0, 0)
+mesh = SubResource("body_mesh")
+surface_material_override/0 = SubResource("fur_mat")
+
+[node name="Belly" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.33, 0.12)
+rotation = Vector3(0.45, 0, 0)
+mesh = SubResource("belly_mesh")
+surface_material_override/0 = SubResource("belly_mat")
+
+[node name="Head" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.7, 0.2)
+mesh = SubResource("head_mesh")
+surface_material_override/0 = SubResource("fur_mat")
+
+[node name="Snout" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.65, 0.36)
+mesh = SubResource("snout_mesh")
+surface_material_override/0 = SubResource("belly_mat")
+
+[node name="Nose" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.67, 0.44)
+mesh = SubResource("dot_mesh")
+surface_material_override/0 = SubResource("dark_mat")
+
+[node name="EyeLeft" type="MeshInstance3D" parent="Model"]
+position = Vector3(0.1, 0.75, 0.34)
+mesh = SubResource("dot_mesh")
+surface_material_override/0 = SubResource("dark_mat")
+
+[node name="EyeRight" type="MeshInstance3D" parent="Model"]
+position = Vector3(-0.1, 0.75, 0.34)
+mesh = SubResource("dot_mesh")
+surface_material_override/0 = SubResource("dark_mat")
+
+[node name="EarLeft" type="MeshInstance3D" parent="Model"]
+position = Vector3(0.11, 0.9, 0.17)
+mesh = SubResource("ear_mesh")
+surface_material_override/0 = SubResource("fur_mat")
+
+[node name="EarRight" type="MeshInstance3D" parent="Model"]
+position = Vector3(-0.11, 0.9, 0.17)
+mesh = SubResource("ear_mesh")
+surface_material_override/0 = SubResource("fur_mat")
+
+[node name="Tail" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.55, -0.32)
+rotation = Vector3(-0.3, 0, 0)
+mesh = SubResource("tail_mesh")
+surface_material_override/0 = SubResource("fur_mat")
+
+[node name="TailTip" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.95, -0.42)
+mesh = SubResource("tail_tip_mesh")
+surface_material_override/0 = SubResource("fur_mat")
+
+[node name="CameraPivot" type="Node3D" parent="."]
+position = Vector3(0, 0.9, 0)
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot"]
+rotation = Vector3(-0.35, 0, 0)
+collision_mask = 1
+spring_length = 5.0
+margin = 0.2
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D"]
+current = true
+fov = 65.0

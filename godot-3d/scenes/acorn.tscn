@@ -1,0 +1,55 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/acorn.gd" id="1_script"]
+
+[sub_resource type="SphereShape3D" id="shape"]
+radius = 0.6
+
+[sub_resource type="StandardMaterial3D" id="nut_mat"]
+albedo_color = Color(0.8, 0.55, 0.22, 1)
+roughness = 0.6
+
+[sub_resource type="StandardMaterial3D" id="cap_mat"]
+albedo_color = Color(0.36, 0.22, 0.1, 1)
+roughness = 1.0
+
+[sub_resource type="SphereMesh" id="nut_mesh"]
+radius = 0.2
+height = 0.5
+radial_segments = 12
+rings = 6
+
+[sub_resource type="SphereMesh" id="cap_mesh"]
+radius = 0.23
+height = 0.2
+radial_segments = 12
+rings = 4
+is_hemisphere = true
+
+[sub_resource type="CylinderMesh" id="stem_mesh"]
+top_radius = 0.025
+bottom_radius = 0.035
+height = 0.12
+radial_segments = 6
+
+[node name="Acorn" type="Area3D"]
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("1_script")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("shape")
+
+[node name="Nut" type="MeshInstance3D" parent="."]
+mesh = SubResource("nut_mesh")
+surface_material_override/0 = SubResource("nut_mat")
+
+[node name="Cap" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.08, 0)
+mesh = SubResource("cap_mesh")
+surface_material_override/0 = SubResource("cap_mat")
+
+[node name="Stem" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.32, 0)
+mesh = SubResource("stem_mesh")
+surface_material_override/0 = SubResource("cap_mat")

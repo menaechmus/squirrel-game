@@ -1,0 +1,125 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #1d2b1a;
+  color: #fff;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, "Courier New", monospace;
+  font-weight: bold;
+  /* Stop the page scrolling, zooming or selecting text while playing. */
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#game {
+  position: absolute;
+  left: 0;
+  top: 0;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+#hud {
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 10px calc(14px + env(safe-area-inset-left));
+  font-size: clamp(14px, 4vmin, 22px);
+  text-shadow: 2px 2px 0 #000;
+  pointer-events: none;
+}
+
+#mute {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 0.7em;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid #fff;
+  padding: 4px 8px;
+}
+
+.panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(14, 32, 18, 0.8);
+  font-size: clamp(14px, 3.6vmin, 20px);
+}
+
+.panel h1 {
+  margin: 0;
+  font-size: clamp(28px, 9vmin, 56px);
+  color: #f0c670;
+  text-shadow: 4px 4px 0 #6a4322;
+}
+
+.panel p {
+  margin: 0;
+  max-width: 32em;
+}
+
+.dim {
+  color: #b9d3b4;
+}
+
+.panel button {
+  font: inherit;
+  font-size: 1.5em;
+  color: #2b1d16;
+  background: #f0c670;
+  border: 4px solid #6a4322;
+  box-shadow: 0 6px 0 #6a4322;
+  padding: 12px 36px;
+  margin-top: 8px;
+  cursor: pointer;
+}
+
+.panel button:active {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 #6a4322;
+}
+
+/* Touch joystick: appears where the thumb lands. */
+#stick {
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  margin: -48px 0 0 -48px;
+  border: 4px solid rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.12);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+#knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  background: rgba(255, 255, 255, 0.7);
+}
