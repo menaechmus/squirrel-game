@@ -11,7 +11,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud" hidden>
-  <span id="acorns">Acorns 0/20</span>
+  <span id="acorns">Acorns 0</span>
   <button id="mute" type="button" aria-label="Toggle sound">Sound on</button>
   <span id="time">0:00.0</span>
 </div>
@@ -20,21 +20,26 @@
 
 <div id="start" class="panel">
   <h1>Squirrel Game</h1>
-  <p>Find every acorn in the park as fast as you can.</p>
+  <p>Gather more acorns than anyone else before the park is picked clean.</p>
+  <p class="dim">Blue jays, groundhogs and grey squirrels want them too. Stay close to an acorn to scare a thief off.</p>
   <p id="help" class="dim"></p>
   <button id="play" type="button" autofocus>Play</button>
 </div>
 
-<div id="win" class="panel" hidden>
-  <h1>Winter is sorted!</h1>
+<div id="over" class="panel" hidden>
+  <h1 id="verdict">Winter is sorted!</h1>
   <p id="result"></p>
+  <p id="rivals" class="dim"></p>
   <p id="best" class="dim"></p>
   <button id="again" type="button">Play again</button>
 </div>
 
 <script src="js/sprites.js"></script>
+<script src="js/scenery.js"></script>
+<script src="js/effects.js"></script>
 <script src="js/level.js"></script>
 <script src="js/input.js"></script>
+<script src="js/rivals.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

@@ -17,7 +17,10 @@ html, body {
 
 body {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
 }
 
 [hidden] {
@@ -34,13 +37,16 @@ body {
 
 #hud {
   position: absolute;
-  inset: 0 0 auto 0;
+  top: 0;
+  right: 0;
+  left: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
   padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 10px calc(14px + env(safe-area-inset-left));
-  font-size: clamp(14px, 4vmin, 22px);
+  font-size: clamp(12px, 4vmin, 22px);
+  white-space: nowrap;
   text-shadow: 2px 2px 0 #000;
   pointer-events: none;
 }
@@ -55,45 +61,70 @@ body {
   padding: 4px 8px;
 }
 
+/* Start and end screens. Spacing shrinks on short screens (a phone held
+   sideways); if everything still can't fit, the panel scrolls. */
 .panel {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 18px;
-  padding: 24px;
+  gap: clamp(6px, 2.6vh, 18px);
+  padding: clamp(8px, 3vh, 24px) 24px;
   text-align: center;
   background: rgba(14, 32, 18, 0.8);
-  font-size: clamp(14px, 3.6vmin, 20px);
+  font-size: clamp(13px, 3.6vmin, 20px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+/* Centred while there is room; from the top when there isn't, so nothing is cut off. */
+.panel > :first-child {
+  margin-top: auto;
+}
+
+.panel > :last-child {
+  margin-bottom: auto;
 }
 
 .panel h1 {
   margin: 0;
-  font-size: clamp(28px, 9vmin, 56px);
+  font-size: clamp(24px, 9vmin, 56px);
   color: #f0c670;
   text-shadow: 4px 4px 0 #6a4322;
 }
 
 .panel p {
   margin: 0;
-  max-width: 32em;
+  max-width: 36em;
 }
 
 .dim {
   color: #b9d3b4;
 }
 
+#rivals span {
+  display: inline-block;
+  margin: 0 0.6em;
+  white-space: nowrap;
+}
+
 .panel button {
+  flex-shrink: 0;
   font: inherit;
   font-size: 1.5em;
   color: #2b1d16;
   background: #f0c670;
   border: 4px solid #6a4322;
   box-shadow: 0 6px 0 #6a4322;
-  padding: 12px 36px;
-  margin-top: 8px;
+  padding: clamp(6px, 2vh, 12px) 36px;
+  margin-top: clamp(0px, 1vh, 8px);
+  /* Room for the drop shadow, which would otherwise be clipped when the panel scrolls. */
+  margin-bottom: 8px;
   cursor: pointer;
 }
 
