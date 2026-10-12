@@ -59,7 +59,7 @@
   let audio = null;
   let muted = false;
 
-  const rivals = Rivals.create({ level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView });
+  const rivals = Rivals.create({ level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView, puff });
 
   // ---- screen ----
 
@@ -176,6 +176,14 @@
     for (let i = 0; i < 8; i++) {
       const angle = (i / 8) * Math.PI * 2;
       particles.push({ x: acorn.x, y: acorn.y - 6, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 30, life: 0.4, color });
+    }
+  }
+
+  // A little dirt thrown up where a groundhog breaks the surface.
+  function puff(spot) {
+    for (let i = 0; i < 7; i++) {
+      const sideways = i - 3;
+      particles.push({ x: spot.x + sideways * 2, y: spot.y - 1, vx: sideways * 9, vy: -30 - (i % 3) * 9, life: 0.35 + (i % 2) * 0.1, color: i % 2 ? '#b89462' : '#7d5c3a' });
     }
   }
 

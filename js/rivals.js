@@ -5,7 +5,8 @@
 //
 // The game hands in a `world` to act on:
 //   level, player, acorns() -> list, take(acorn, who), random(), sound(name, at),
-//   view() -> the part of the park on screen, as { x, y, w, h }
+//   view() -> the part of the park on screen, as { x, y, w, h },
+//   puff(spot) -> throw up a little dirt there
 
 const Rivals = (() => {
   // Every number that decides how pushy the rivals are lives here.
@@ -13,45 +14,52 @@ const Rivals = (() => {
   const TUNING = {
     keepClear: 45,          // thieves ignore acorns this close to the player
     jay: {
-      firstVisit: 12,       // delay before the first one arrives
-      gap: [20, 32],        // rest between visits
+      firstVisit: 10,       // delay before the first one arrives
+      gap: [16, 26],        // rest between visits
       hover: 1.6,           // warning time circling over the acorn
       scare: 34,            // it gives up if the player is this close at the swoop
       speed: 130,
       height: 46,
     },
     groundhog: {
-      firstVisit: 22,
-      gap: [24, 38],
+      firstVisit: 18,
+      gap: [19, 30],
       warn: 1.2,            // dirt heaves before it surfaces
       look: 0.6,            // time above ground before it grabs
       scare: 32,
     },
     squirrel: {
-      count: 2,
+      count: 3,
       speed: 44,            // the player runs at 80
       strollSpeed: 22,
       firstRest: 8,
-      rest: [16, 28],       // time spent ambling about between acorns
+      rest: [19, 32],       // time spent ambling about between acorns
       reach: 9,
     },
     // Wildlife that never touches an acorn. It turns up where the player is looking.
     extras: {
       flyBy: {
         first: 4,
-        gap: [5, 11],               // rest between flights
+        gap: [4, 9],                // rest between flights
         flock: [1, 1, 1, 2, 2, 3],  // birds per flight, picked at random
         speed: [95, 135],
         height: [38, 62],
       },
       popUp: {
-        first: 7,
-        gap: [6, 13],
-        atOnce: 2,                  // groundhogs above ground at the same time
-        warn: 0.7,
-        look: [1.2, 2.6],
-        clearOfPlayer: 55,          // never surfaces this close to the player...
-        duckWithin: 36,             // ...and ducks if the player walks up
+        first: 3,
+        gap: [3.5, 7],              // rest between new arrivals
+        hurry: 0.7,                 // ...times this while the player is on the move and leaving them behind
+        atOnce: 3,                  // groundhogs out at the same time
+        warn: 0.4,                  // dirt heaves before one surfaces
+        look: [2, 4],               // seconds above ground each time
+        encores: [0, 1, 1, 2],      // how many more times it pops out of the same hole, picked at random
+        under: [0.8, 2],            // seconds below ground between those
+        peekShare: 0.5,             // how often only the top of its head comes out
+        nearShare: 0.75,            // how often it picks a spot close to where the player is heading
+        lead: 1.3,                  // how many seconds ahead of the player to aim
+        reach: 115,                 // "close" means within this far of that point
+        clearOfPlayer: 40,          // never surfaces this close to the player...
+        duckWithin: 26,             // ...and ducks if the player walks up
         clearOfAcorns: 30,          // nor beside an acorn, where a thief would
       },
     },
@@ -62,6 +70,8 @@ const Rivals = (() => {
   const MAX_HOLES = 8;
   const HOLE_LIFE = 20;
   const HOLE_FILLING = 1.5;   // for its last moments a hole shows as a heap of loose dirt
+  const PEEK = 0.6;           // how far out a peeking groundhog comes: ears, eyes and nose
+  const MAX_DRIFT = 120;      // ignore the player "moving" faster than this (a restart, not a run)
 
   function create(world) {
     const { level, player } = world;
@@ -81,6 +91,10 @@ const Rivals = (() => {
     let flyByTimer = 0;
     let popUpTimer = 0;
     const pick = ([min, max]) => min + extraRandom() * (max - min);
+    // Which way the player is heading (a smoothed velocity, pixels a second), so
+    // a groundhog can surface where they are about to be looking.
+    let drift = { x: 0, y: 0 };
+    let lastSpot = { x: player.x, y: player.y };
 
     // An acorn nobody else is after, away from the player. A rival "claims" its
     // target so two of them never go for the same one.
@@ -107,6 +121,8 @@ const Rivals = (() => {
       extraRandom = seededRandom(Math.floor(world.random() * 0x7fffffff));
       flyByTimer = TUNING.extras.flyBy.first;
       popUpTimer = TUNING.extras.popUp.first;
+      drift = { x: 0, y: 0 };
+      lastSpot = { x: player.x, y: player.y };
       jay = { state: 'away', timer: TUNING.jay.firstVisit, x: 0, y: 0, z: 0, facing: 'right', flap: 0, carrying: false, target: null };
       hog = { state: 'hidden', timer: TUNING.groundhog.firstVisit, x: 0, y: 0, rise: 0, carrying: false, target: null };
       // Grey squirrels start in opposite corners, well away from the player.
@@ -435,15 +451,35 @@ const Rivals = (() => {
       }
     }
 
-    // Somewhere in view for a groundhog to surface: open ground, away from the
+    // The part of the park that will be on screen a moment from now, given
+    // where the player is heading: the view slid along, but not past the hedge.
+    function comingView(view) {
+      const lead = TUNING.extras.popUp.lead;
+      const slide = (from, by, span) => (span >= level.size ? from : Math.min(level.size - span, Math.max(0, from + by)));
+      return { x: slide(view.x, drift.x * lead, view.w), y: slide(view.y, drift.y * lead, view.h), w: view.w, h: view.h };
+    }
+
+    // Somewhere for a groundhog to surface where the player will see it: open
+    // ground, usually a short run from where they are heading, away from the
     // player, the acorns (that is where a thief comes up) and other holes.
     function popUpSpot(view) {
       const tuning = TUNING.extras.popUp;
-      for (let attempt = 0; attempt < 12; attempt++) {
-        const spot = {
-          x: Math.round(view.x + 16 + extraRandom() * (view.w - 32)),
-          y: Math.round(view.y + 30 + extraRandom() * (view.h - 44)),
-        };
+      const ahead = { x: player.x + drift.x * tuning.lead, y: player.y + drift.y * tuning.lead };
+      const soon = comingView(view);
+      const speed = Math.hypot(drift.x, drift.y);
+      for (let attempt = 0; attempt < 16; attempt++) {
+        let spot;
+        if (extraRandom() < tuning.nearShare) {
+          // Anywhere round a player who is standing still; in front of one on the move.
+          const angle = speed > 15
+            ? Math.atan2(drift.y, drift.x) + (extraRandom() - 0.5) * 3.4
+            : extraRandom() * Math.PI * 2;
+          const distance = tuning.clearOfPlayer + 4 + extraRandom() * (tuning.reach - tuning.clearOfPlayer - 4);
+          spot = { x: Math.round(ahead.x + Math.cos(angle) * distance), y: Math.round(ahead.y + Math.sin(angle) * distance) };
+        } else {
+          spot = { x: Math.round(soon.x + 16 + extraRandom() * (view.w - 32)), y: Math.round(soon.y + 30 + extraRandom() * (view.h - 44)) };
+        }
+        if (spot.x < soon.x + 12 || spot.x > soon.x + view.w - 12 || spot.y < soon.y + 26 || spot.y > soon.y + view.h - 10) continue;
         if (level.blocked(spot.x, spot.y, 8) || near(player, spot, tuning.clearOfPlayer)) continue;
         if (world.acorns().some((acorn) => near(acorn, spot, tuning.clearOfAcorns))) continue;
         if (holes.some((other) => near(other, spot, 24)) || visitors.some((other) => near(other, spot, 40))) continue;
@@ -477,19 +513,35 @@ const Rivals = (() => {
 
       popUpTimer -= dt;
       if (popUpTimer <= 0) {
-        popUpTimer = pick(popUp.gap);
+        popUpTimer = pick(popUp.gap) * (Math.hypot(drift.x, drift.y) > 15 ? popUp.hurry : 1);
         const spot = visitors.length < popUp.atOnce && popUpSpot(view);
-        if (spot) visitors.push({ x: spot.x, y: spot.y, state: 'mound', timer: popUp.warn, rise: 0, looked: 0 });
+        if (spot) {
+          visitors.push({
+            x: spot.x, y: spot.y, state: 'mound', timer: popUp.warn, rise: 0, top: 1, looked: 0,
+            encores: popUp.encores[Math.floor(extraRandom() * popUp.encores.length)],
+          });
+        }
       }
+      // A visitor heaves up a mound, rises, looks about and sinks; then it may
+      // wait under ground and come up again from the same hole.
+      const soon = comingView(view);
+      const outside = (spot, rect) => spot.x < rect.x - 24 || spot.x > rect.x + rect.w + 24
+        || spot.y < rect.y - 24 || spot.y > rect.y + rect.h + 24;
       for (const visitor of visitors) {
+        // Once the player has left it behind it goes home, making room for another in view.
+        if (outside(visitor, view) && outside(visitor, soon)) {
+          if (visitor.state === 'mound') visitor.gone = true;
+          else leave(visitor);
+          continue;
+        }
         const startled = near(player, visitor, popUp.duckWithin);
         if (visitor.state === 'mound') {
           visitor.timer -= dt;
           if (startled) visitor.gone = true;   // thinks better of it
-          else if (visitor.timer <= 0) visitor.state = 'rise';
+          else if (visitor.timer <= 0) surface(visitor);
         } else if (visitor.state === 'rise') {
-          visitor.rise = Math.min(1, visitor.rise + dt / 0.22);
-          if (visitor.rise >= 1) {
+          visitor.rise = Math.min(visitor.top, visitor.rise + dt / 0.22);
+          if (visitor.rise >= visitor.top) {
             visitor.state = 'look';
             visitor.timer = pick(popUp.look);
           }
@@ -500,19 +552,50 @@ const Rivals = (() => {
             visitor.state = 'sink';
             visitor.hurried = startled;
           }
-        } else {
+        } else if (visitor.state === 'sink') {
           visitor.rise -= dt / (visitor.hurried ? 0.14 : 0.3);
-          if (visitor.rise <= 0) {
-            digHole(visitor);
-            visitor.gone = true;
+          if (visitor.rise > 0) continue;
+          visitor.rise = 0;
+          if (visitor.encores > 0 && !visitor.hurried) {
+            visitor.encores--;
+            visitor.state = 'under';
+            visitor.timer = pick(popUp.under);
+          } else {
+            leave(visitor);
           }
+        } else {
+          // Under ground between looks; it stays down if the player is on top of it.
+          visitor.timer -= dt;
+          if (startled) leave(visitor);
+          else if (visitor.timer <= 0) surface(visitor);
         }
       }
       visitors = visitors.filter((visitor) => !visitor.gone);
     }
 
+    // A visitor breaks the surface, sometimes only as far as its eyes.
+    function surface(visitor) {
+      visitor.state = 'rise';
+      visitor.rise = 0;
+      visitor.hurried = false;
+      visitor.top = extraRandom() < TUNING.extras.popUp.peekShare ? PEEK : 1;
+      world.puff(visitor);
+    }
+
+    function leave(visitor) {
+      digHole(visitor);
+      visitor.gone = true;
+    }
+
     function update(dt) {
       if (!active) return;
+      if (dt > 0) {
+        const pace = (now, before) => Math.max(-MAX_DRIFT, Math.min(MAX_DRIFT, (now - before) / dt));
+        const ease = Math.min(1, dt * 5);
+        drift.x += (pace(player.x, lastSpot.x) - drift.x) * ease;
+        drift.y += (pace(player.y, lastSpot.y) - drift.y) * ease;
+        lastSpot = { x: player.x, y: player.y };
+      }
       updateJay(dt);
       updateHog(dt);
       for (const squirrel of squirrels) updateSquirrel(squirrel, dt);
@@ -532,7 +615,8 @@ const Rivals = (() => {
         ? { sprite: Sprites.mound[0], x: hole.x - 8, y: hole.y - 4 }
         : { sprite: Sprites.hole, x: hole.x - 8, y: hole.y - 3 }));
       for (const groundhog of [hog, ...visitors]) {
-        if (isUp(groundhog)) list.push({ sprite: Sprites.hole, x: groundhog.x - 8, y: groundhog.y - 3 });
+        // Its hole is open while it is up, and while a visitor waits below between looks.
+        if (isUp(groundhog) || groundhog.state === 'under') list.push({ sprite: Sprites.hole, x: groundhog.x - 8, y: groundhog.y - 3 });
       }
       return list;
     }

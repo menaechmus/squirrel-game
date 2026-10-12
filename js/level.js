@@ -6,9 +6,9 @@ const Level = (() => {
   const SIZE = TILE * 60;
   const BORDER = TILE * 2;   // hedge thickness
   const SEED = 20261012;
-  const ACORN_COUNT = 30;
-  const ACORNS_BY_TREES = 8;
-  const ACORNS_BY_BUSHES = 5;
+  const ACORN_COUNT = 45;
+  const ACORNS_BY_TREES = 12;
+  const ACORNS_BY_BUSHES = 8;
   const TUFT_COUNT = 260;
 
   // What to scatter: how many, how much room each needs, and which sprites to
