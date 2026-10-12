@@ -11,9 +11,12 @@
 <canvas id="game"></canvas>
 
 <div id="hud" hidden>
-  <span id="acorns">Acorns 0</span>
-  <button id="mute" type="button" aria-label="Toggle sound">Sound on</button>
-  <span id="time">0:00.0</span>
+  <div id="hud-row">
+    <span id="acorns">Acorns 0</span>
+    <button id="mute" type="button" aria-label="Toggle sound">Sound on</button>
+    <span id="time">0:00.0</span>
+  </div>
+  <canvas id="minimap" width="48" height="48" aria-label="Map of the park"></canvas>
 </div>
 
 <div id="stick" hidden><div id="knob"></div></div>
@@ -21,7 +24,7 @@
 <div id="start" class="panel">
   <h1>Squirrel Game</h1>
   <p>Gather more acorns than anyone else before the park is picked clean.</p>
-  <p class="dim">Blue jays, groundhogs and grey squirrels want them too. Stay close to an acorn to scare a thief off.</p>
+  <p class="dim">Arrows point to the nearest acorns. Stay close to one to scare off a thieving jay or groundhog.</p>
   <p id="help" class="dim"></p>
   <button id="play" type="button" autofocus>Play</button>
 </div>
@@ -39,6 +42,7 @@
 <script src="js/effects.js"></script>
 <script src="js/level.js"></script>
 <script src="js/input.js"></script>
+<script src="js/hud.js"></script>
 <script src="js/rivals.js"></script>
 <script src="js/game.js"></script>
 </body>

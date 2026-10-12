@@ -5,7 +5,10 @@
   const SPEED = 80;          // game pixels per second
   const PLAYER_RADIUS = 4;
   const PICKUP_RADIUS = 11;
-  const HINT_WHEN_LEFT = 3;  // point towards the last few acorns
+  const HINT_ARROWS = 3;     // arrows point to this many of the nearest acorns out of sight
+  const ARROW_BLINK = [0.5, 0.2];   // seconds shown, seconds hidden
+  const TURN_BEFORE_SNIFF = 0.3;    // the squirrel turns towards an acorn this long before each round of sniffs
+  const MINIMAP_SHARE = 0.18;       // minimap width as a share of the screen's shorter side
   const BEST_KEY = 'squirrel-game-best-haul';
   const RIVAL_NAMES = { jays: 'Blue jays', groundhogs: 'Groundhogs', squirrels: 'Grey squirrels' };
   // Each sound is a few square-wave notes: [frequency, delay, length].
@@ -22,22 +25,26 @@
   const el = (id) => document.getElementById(id);
   const canvas = el('game');
   const ctx = canvas.getContext('2d');
+  const minimap = el('minimap');
+  const minimapCtx = minimap.getContext('2d');
 
   const level = Level.generate();
   const ground = Scenery.buildGround(level);
   const pond = Scenery.buildPond(level);
+  const miniature = Hud.buildMinimap(level);
   const effects = Effects.create(level);
   const total = level.acorns.length;
 
   // Test hooks: ?autoplay=N plays by itself at N times speed, &pace=0.4 slows
-  // the test squirrel to 40% (closer to a person), &seed=7 varies the rivals' luck.
+  // the test squirrel to 40% (closer to a person; 0 parks it), &seed=7 varies
+  // the rivals' luck.
   const params = new URLSearchParams(location.search);
   const auto = params.has('autoplay')
-    ? { speed: Number(params.get('autoplay')) || 1, pace: Number(params.get('pace')) || 1, target: null, best: Infinity, stalled: 0, noclip: 0, noclips: 0 }
+    ? { speed: Number(params.get('autoplay')) || 1, pace: params.has('pace') ? Number(params.get('pace')) : 1, target: null, best: Infinity, stalled: 0, noclip: 0, noclips: 0 }
     : null;
   const random = seededRandom(params.has('seed') ? Number(params.get('seed')) : auto ? 1 : Date.now());
 
-  const player = { x: level.spawn.x, y: level.spawn.y, facing: 'down', moving: false, hop: 0 };
+  const player = { x: level.spawn.x, y: level.spawn.y, facing: 'down', moving: false, hop: 0, idle: 0, sniffRound: -1 };
   const counts = { you: 0, jays: 0, groundhogs: 0, squirrels: 0 };
   let state = 'menu';   // 'menu' | 'playing' | 'over'
   let acorns = [];
@@ -46,10 +53,13 @@
   let clock = 0;        // always running, for animation
   let viewW = 0;
   let viewH = 0;
+  // Where the HUD sits, in game pixels, so hint arrows can keep clear of it.
+  let hudBottom = 0;
+  let minimapBox = { left: 0, top: 0, right: 0, bottom: 0 };
   let audio = null;
   let muted = false;
 
-  const rivals = Rivals.create({ level, player, acorns: () => acorns, take: takeAcorn, random, sound });
+  const rivals = Rivals.create({ level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView });
 
   // ---- screen ----
 
@@ -66,6 +76,19 @@
     canvas.style.width = (viewW * zoom) / ratio + 'px';
     canvas.style.height = (viewH * zoom) / ratio + 'px';
     ctx.imageSmoothingEnabled = false;
+    // The minimap gets a whole-number scale of its own.
+    const mapZoom = Math.max(1, Math.round((Math.min(screenW, screenH) * MINIMAP_SHARE) / minimap.width));
+    minimap.style.width = (minimap.width * mapZoom) / ratio + 'px';
+    minimap.style.height = (minimap.height * mapZoom) / ratio + 'px';
+    measureHud();
+  }
+
+  function measureHud() {
+    const perCssPixel = viewW / canvas.getBoundingClientRect().width;
+    const row = el('hud-row').getBoundingClientRect();
+    const map = minimap.getBoundingClientRect();
+    hudBottom = row.bottom * perCssPixel;
+    minimapBox = { left: map.left * perCssPixel, top: map.top * perCssPixel, right: map.right * perCssPixel, bottom: map.bottom * perCssPixel };
   }
 
   // ---- sound ----
@@ -133,6 +156,8 @@
     player.x = level.spawn.x;
     player.y = level.spawn.y;
     player.facing = 'down';
+    player.idle = 0;
+    player.sniffRound = -1;
     acorns = level.acorns.map((acorn, index) => ({ x: acorn.x, y: acorn.y, phase: index, claimedBy: null, gone: false }));
     for (const who of Object.keys(counts)) counts[who] = 0;
     particles = [];
@@ -144,6 +169,7 @@
     el('over').hidden = true;
     el('hud').hidden = false;
     updateHud();
+    measureHud();
   }
 
   function burst(acorn, color, speed) {
@@ -203,7 +229,7 @@
 
   // ---- update ----
 
-  function autoVector(dt) {
+  function nearestAcorn() {
     let nearest = null;
     let nearestDistance = Infinity;
     for (const acorn of acorns) {
@@ -213,7 +239,13 @@
         nearestDistance = distance;
       }
     }
+    return nearest;
+  }
+
+  function autoVector(dt) {
+    const nearest = nearestAcorn();
     if (!nearest) return { x: 0, y: 0 };
+    const nearestDistance = Math.hypot(nearest.x - player.x, nearest.y - player.y);
     if (nearest !== auto.target) {
       auto.target = nearest;
       auto.best = Infinity;
@@ -233,6 +265,20 @@
     return { x: ((nearest.x - player.x) / nearestDistance) * auto.pace, y: ((nearest.y - player.y) / nearestDistance) * auto.pace };
   }
 
+  // Standing still, the squirrel sniffs out the nearest acorn: it turns to face
+  // it just before each round of the idle routine in sprites.js begins.
+  function sniffAround() {
+    const round = Math.floor((player.idle - Sprites.IDLE_START + TURN_BEFORE_SNIFF) / Sprites.IDLE_CYCLE);
+    if (round < 0 || round === player.sniffRound) return;
+    player.sniffRound = round;
+    const acorn = nearestAcorn();
+    if (!acorn) return;
+    const dx = acorn.x - player.x;
+    const dy = acorn.y - player.y;
+    if (Math.abs(dx) > Math.abs(dy)) player.facing = dx < 0 ? 'left' : 'right';
+    else player.facing = dy < 0 ? 'up' : 'down';
+  }
+
   function update(dt) {
     clock += dt;
     effects.update(dt, clock);
@@ -243,14 +289,15 @@
       particle.life -= dt;
     }
     particles = particles.filter((particle) => particle.life > 0);
+    if (state !== 'playing') {
+      player.moving = false;
+      player.idle += dt;
+    }
     if (state === 'menu') return;
 
     // After the round the rivals carry on, so a jay still flies off with its prize.
     rivals.update(dt);
-    if (state !== 'playing') {
-      player.moving = false;
-      return;
-    }
+    if (state !== 'playing') return;
 
     time += dt;
     const move = auto ? autoVector(dt) : Input.vector();
@@ -259,10 +306,14 @@
       player.x += move.x * SPEED * dt;
       player.y += move.y * SPEED * dt;
       player.hop += dt;
+      player.idle = 0;
+      player.sniffRound = -1;
       if (Math.abs(move.x) > Math.abs(move.y)) player.facing = move.x < 0 ? 'left' : 'right';
       else player.facing = move.y < 0 ? 'up' : 'down';
     } else {
       player.hop = 0;
+      player.idle += dt;
+      sniffAround();
     }
     if (!(auto && auto.noclip > 0)) level.pushOut(player, PLAYER_RADIUS);
 
@@ -280,9 +331,17 @@
     return Math.round(Math.min(level.size - view, Math.max(0, target - view / 2)));
   }
 
+  // The part of the park that is on screen, in park pixels. The camera follows
+  // the whole pixel the squirrel is drawn on; following its exact position would
+  // make it and the background snap to pixels at different moments and judder.
+  function cameraView() {
+    return { x: cameraOffset(Math.round(player.x), viewW), y: cameraOffset(Math.round(player.y), viewH), w: viewW, h: viewH };
+  }
+
   function draw() {
-    const camX = cameraOffset(player.x, viewW);
-    const camY = cameraOffset(player.y, viewH);
+    const view = cameraView();
+    const camX = view.x;
+    const camY = view.y;
     ctx.fillStyle = '#2a6e33';
     ctx.fillRect(0, 0, viewW, viewH);
     ctx.drawImage(ground, -camX, -camY);
@@ -324,8 +383,12 @@
     for (const thing of rivals.things(clock)) {
       things.push({ sprite: thing.sprite, x: thing.x - camX, y: thing.y - camY, depth: thing.depth, clip: thing.clip });
     }
+    const poses = Sprites.squirrel[player.facing];
     const hop = player.moving ? [0, 1, 2, 1][Math.floor(player.hop * 12) % 4] : 0;
-    const squirrel = { sprite: Sprites.squirrel[player.facing], x: px - 8, y: py - 15 - hop, depth: player.y };
+    const squirrel = {
+      sprite: player.moving ? poses.rest : Sprites.idleFrame(poses, player.idle),
+      x: px - 8, y: py - 15 - hop, depth: player.y,
+    };
     things.push(squirrel);
     things.sort((a, b) => a.depth - b.depth);
     for (const thing of things) {
@@ -352,27 +415,15 @@
       ctx.fillRect(Math.round(particle.x) - camX, Math.round(particle.y) - camY, 1, 1);
     }
 
-    if (state === 'playing' && acorns.length <= HINT_WHEN_LEFT) drawHint(camX, camY);
-  }
-
-  // A blinking marker on the screen edge, pointing at the nearest off-screen acorn.
-  function drawHint(camX, camY) {
-    let nearest = null;
-    for (const acorn of acorns) {
-      if (!nearest || Math.hypot(acorn.x - player.x, acorn.y - player.y) < Math.hypot(nearest.x - player.x, nearest.y - player.y)) {
-        nearest = acorn;
+    if (state === 'playing' && clock % (ARROW_BLINK[0] + ARROW_BLINK[1]) < ARROW_BLINK[0]) {
+      // Blinking arrows on the edge of the view, clear of the HUD and the minimap.
+      const safe = { left: 7, top: Math.ceil(hudBottom) + 7, right: viewW - 8, bottom: viewH - 8 };
+      for (const arrow of Hud.hintArrows(player, acorns, view, HINT_ARROWS, safe, [minimapBox])) {
+        const sprite = Sprites.arrows[arrow.direction];
+        ctx.drawImage(sprite, arrow.x - (sprite.width >> 1), arrow.y - (sprite.height >> 1));
       }
     }
-    if (!nearest) return;
-    const x = nearest.x - camX;
-    const y = nearest.y - 6 - camY;
-    if ((x >= 0 && x < viewW && y >= 0 && y < viewH) || Math.floor(clock * 3) % 2) return;
-    const hx = Math.min(viewW - 7, Math.max(3, x));
-    const hy = Math.min(viewH - 7, Math.max(3, y));
-    ctx.fillStyle = '#2b1d16';
-    ctx.fillRect(hx - 1, hy - 1, 6, 6);
-    ctx.fillStyle = '#f0c670';
-    ctx.fillRect(hx, hy, 4, 4);
+    if (state !== 'menu') Hud.drawMinimap(minimapCtx, miniature, level, player, view, clock);
   }
 
   // ---- loop ----

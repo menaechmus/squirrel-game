@@ -1,7 +1,11 @@
 // The competition: a blue jay that swoops on acorns, a groundhog that pops up
 // beside them, and grey squirrels that run for them. Each is a small state
-// machine. The game hands in a `world` to act on:
-//   level, player, acorns() -> list, take(acorn, who), random(), sound(name, at)
+// machine. There are also "extras", wildlife that is only for show: jays
+// flying past and groundhogs popping up for a look round.
+//
+// The game hands in a `world` to act on:
+//   level, player, acorns() -> list, take(acorn, who), random(), sound(name, at),
+//   view() -> the part of the park on screen, as { x, y, w, h }
 
 const Rivals = (() => {
   // Every number that decides how pushy the rivals are lives here.
@@ -31,10 +35,33 @@ const Rivals = (() => {
       rest: [16, 28],       // time spent ambling about between acorns
       reach: 9,
     },
+    // Wildlife that never touches an acorn. It turns up where the player is looking.
+    extras: {
+      flyBy: {
+        first: 4,
+        gap: [5, 11],               // rest between flights
+        flock: [1, 1, 1, 2, 2, 3],  // birds per flight, picked at random
+        speed: [95, 135],
+        height: [38, 62],
+      },
+      popUp: {
+        first: 7,
+        gap: [6, 13],
+        atOnce: 2,                  // groundhogs above ground at the same time
+        warn: 0.7,
+        look: [1.2, 2.6],
+        clearOfPlayer: 55,          // never surfaces this close to the player...
+        duckWithin: 36,             // ...and ducks if the player walks up
+        clearOfAcorns: 30,          // nor beside an acorn, where a thief would
+      },
+    },
   };
 
   const HOLE_OFFSETS = [[-12, 3], [12, 3], [0, 9], [-10, -5], [10, -5]];
-  const MAX_HOLES = 10;
+  // Holes fill themselves in after a while, so the lawn doesn't end up pockmarked.
+  const MAX_HOLES = 8;
+  const HOLE_LIFE = 20;
+  const HOLE_FILLING = 1.5;   // for its last moments a hole shows as a heap of loose dirt
 
   function create(world) {
     const { level, player } = world;
@@ -46,6 +73,14 @@ const Rivals = (() => {
     let hog = {};
     let squirrels = [];
     let holes = [];
+    // The extras, and their own run of random numbers so that however many
+    // turn up, the thieves behave exactly the same.
+    let passers = [];
+    let visitors = [];
+    let extraRandom = Math.random;
+    let flyByTimer = 0;
+    let popUpTimer = 0;
+    const pick = ([min, max]) => min + extraRandom() * (max - min);
 
     // An acorn nobody else is after, away from the player. A rival "claims" its
     // target so two of them never go for the same one.
@@ -67,6 +102,11 @@ const Rivals = (() => {
     function reset() {
       active = true;
       holes = [];
+      passers = [];
+      visitors = [];
+      extraRandom = seededRandom(Math.floor(world.random() * 0x7fffffff));
+      flyByTimer = TUNING.extras.flyBy.first;
+      popUpTimer = TUNING.extras.popUp.first;
       jay = { state: 'away', timer: TUNING.jay.firstVisit, x: 0, y: 0, z: 0, facing: 'right', flap: 0, carrying: false, target: null };
       hog = { state: 'hidden', timer: TUNING.groundhog.firstVisit, x: 0, y: 0, rise: 0, carrying: false, target: null };
       // Grey squirrels start in opposite corners, well away from the player.
@@ -77,6 +117,7 @@ const Rivals = (() => {
       for (let i = 0; i < TUNING.squirrel.count; i++) {
         const squirrel = {
           x: corners[i % 4].x, y: corners[i % 4].y, facing: 'down', moving: false, hop: 0,
+          idle: i * 1.3,   // staggered, so they don't sniff in step
           state: 'rest', timer: TUNING.squirrel.firstRest + i * 3, target: null,
           best: Infinity, stalled: 0, detour: 0, detourX: 0, detourY: 0, failures: 0,
           strollTo: null, strollTime: 0, pause: 1 + i,
@@ -84,6 +125,11 @@ const Rivals = (() => {
         level.pushOut(squirrel, 4);
         squirrels.push(squirrel);
       }
+    }
+
+    function digHole(spot) {
+      holes.push({ x: spot.x, y: spot.y, age: 0 });
+      while (holes.length > MAX_HOLES) holes.shift();
     }
 
     // ---- blue jay ----
@@ -231,8 +277,7 @@ const Rivals = (() => {
       } else if (hog.state === 'sink') {
         hog.rise -= dt / 0.3;
         if (hog.rise <= 0) {
-          holes.push({ x: hog.x, y: hog.y });
-          if (holes.length > MAX_HOLES) holes.shift();
+          digHole(hog);
           hog.state = 'hidden';
           hog.carrying = false;
           hog.timer = between(tuning.gap);
@@ -257,6 +302,7 @@ const Rivals = (() => {
       squirrel.y += stepY * speed * dt;
       level.pushOut(squirrel, 4);
       squirrel.moving = true;
+      squirrel.idle = 0;
       squirrel.hop += dt;
       if (Math.abs(stepX) > Math.abs(stepY)) squirrel.facing = stepX < 0 ? 'left' : 'right';
       else squirrel.facing = stepY < 0 ? 'up' : 'down';
@@ -268,6 +314,7 @@ const Rivals = (() => {
         squirrel.pause -= dt;
         squirrel.moving = false;
         squirrel.hop = 0;
+        squirrel.idle += dt;
         return;
       }
       if (!squirrel.strollTo) {
@@ -357,72 +404,204 @@ const Rivals = (() => {
       step(squirrel, stepX, stepY, tuning.speed, dt);
     }
 
+    // ---- extras: only for show ----
+
+    // One to three jays cross the part of the park the player is looking at.
+    function launchFlock(view) {
+      const tuning = TUNING.extras.flyBy;
+      const heading = extraRandom() < 0.5 ? -1 : 1;   // -1 flies right to left
+      const count = tuning.flock[Math.floor(extraRandom() * tuning.flock.length)];
+      const speed = pick(tuning.speed);
+      const height = pick(tuning.height);
+      // A bird is drawn `height` above its spot on the ground, so aim the ground
+      // track that much lower to bring the bird itself across the view.
+      const startY = view.y + view.h * (0.12 + extraRandom() * 0.7) + height;
+      const endY = startY + (extraRandom() - 0.5) * view.h * 0.5;
+      for (let i = 0; i < count; i++) {
+        // Followers trail behind and to one side, in a loose formation.
+        const lag = i * (14 + extraRandom() * 10);
+        const aside = i * (extraRandom() < 0.5 ? -9 : 9);
+        passers.push({
+          x: heading > 0 ? view.x - 30 - lag : view.x + view.w + 30 + lag,
+          y: startY + aside,
+          z: height + i * 3,
+          toX: heading > 0 ? view.x + view.w + 40 : view.x - 40,
+          toY: endY + aside,
+          heading, speed,
+          facing: heading > 0 ? 'right' : 'left',
+          flap: extraRandom(),
+          age: 0,
+        });
+      }
+    }
+
+    // Somewhere in view for a groundhog to surface: open ground, away from the
+    // player, the acorns (that is where a thief comes up) and other holes.
+    function popUpSpot(view) {
+      const tuning = TUNING.extras.popUp;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const spot = {
+          x: Math.round(view.x + 16 + extraRandom() * (view.w - 32)),
+          y: Math.round(view.y + 30 + extraRandom() * (view.h - 44)),
+        };
+        if (level.blocked(spot.x, spot.y, 8) || near(player, spot, tuning.clearOfPlayer)) continue;
+        if (world.acorns().some((acorn) => near(acorn, spot, tuning.clearOfAcorns))) continue;
+        if (holes.some((other) => near(other, spot, 24)) || visitors.some((other) => near(other, spot, 40))) continue;
+        if (hog.state !== 'hidden' && near(hog, spot, 40)) continue;
+        if (squirrels.some((squirrel) => near(squirrel, spot, 24))) continue;
+        return spot;
+      }
+      return null;
+    }
+
+    function updateExtras(dt) {
+      const { flyBy, popUp } = TUNING.extras;
+      const view = world.view();
+
+      flyByTimer -= dt;
+      if (flyByTimer <= 0) {
+        launchFlock(view);
+        flyByTimer = pick(flyBy.gap);
+      }
+      for (const bird of passers) {
+        bird.flap += dt;
+        bird.age += dt;
+        if (!flyTowards(bird, bird.toX, bird.toY, bird.speed * dt)) continue;
+        // Still in sight because the player ran alongside? Carry on rather than vanish.
+        const inSight = bird.x > view.x - 24 && bird.x < view.x + view.w + 24
+          && bird.y - bird.z > view.y - 24 && bird.y - bird.z < view.y + view.h + 24;
+        if (inSight && bird.age < 40) bird.toX += bird.heading * 220;
+        else bird.gone = true;
+      }
+      passers = passers.filter((bird) => !bird.gone);
+
+      popUpTimer -= dt;
+      if (popUpTimer <= 0) {
+        popUpTimer = pick(popUp.gap);
+        const spot = visitors.length < popUp.atOnce && popUpSpot(view);
+        if (spot) visitors.push({ x: spot.x, y: spot.y, state: 'mound', timer: popUp.warn, rise: 0, looked: 0 });
+      }
+      for (const visitor of visitors) {
+        const startled = near(player, visitor, popUp.duckWithin);
+        if (visitor.state === 'mound') {
+          visitor.timer -= dt;
+          if (startled) visitor.gone = true;   // thinks better of it
+          else if (visitor.timer <= 0) visitor.state = 'rise';
+        } else if (visitor.state === 'rise') {
+          visitor.rise = Math.min(1, visitor.rise + dt / 0.22);
+          if (visitor.rise >= 1) {
+            visitor.state = 'look';
+            visitor.timer = pick(popUp.look);
+          }
+        } else if (visitor.state === 'look') {
+          visitor.timer -= dt;
+          visitor.looked += dt;
+          if (visitor.timer <= 0 || startled) {
+            visitor.state = 'sink';
+            visitor.hurried = startled;
+          }
+        } else {
+          visitor.rise -= dt / (visitor.hurried ? 0.14 : 0.3);
+          if (visitor.rise <= 0) {
+            digHole(visitor);
+            visitor.gone = true;
+          }
+        }
+      }
+      visitors = visitors.filter((visitor) => !visitor.gone);
+    }
+
     function update(dt) {
       if (!active) return;
       updateJay(dt);
       updateHog(dt);
       for (const squirrel of squirrels) updateSquirrel(squirrel, dt);
+      updateExtras(dt);
+      for (const hole of holes) hole.age += dt;
+      holes = holes.filter((hole) => hole.age < HOLE_LIFE);
     }
 
     // ---- what to draw (all in park coordinates) ----
 
-    const hogIsUp = () => hog.state === 'rise' || hog.state === 'look' || hog.state === 'sink';
+    const isUp = (groundhog) => groundhog.state === 'rise' || groundhog.state === 'look' || groundhog.state === 'sink';
 
     // Flat on the ground, under everything else.
     function decals() {
-      const list = holes.map((spot) => ({ sprite: Sprites.hole, x: spot.x - 8, y: spot.y - 3 }));
-      if (active && hogIsUp()) list.push({ sprite: Sprites.hole, x: hog.x - 8, y: hog.y - 3 });
+      if (!active) return [];
+      const list = holes.map((hole) => (hole.age > HOLE_LIFE - HOLE_FILLING
+        ? { sprite: Sprites.mound[0], x: hole.x - 8, y: hole.y - 4 }
+        : { sprite: Sprites.hole, x: hole.x - 8, y: hole.y - 3 }));
+      for (const groundhog of [hog, ...visitors]) {
+        if (isUp(groundhog)) list.push({ sprite: Sprites.hole, x: groundhog.x - 8, y: groundhog.y - 3 });
+      }
       return list;
     }
 
     function shadows() {
       if (!active) return [];
-      const list = squirrels.map((squirrel) => ({ x: Math.round(squirrel.x), y: Math.round(squirrel.y) }));
+      const list = [...squirrels, ...passers].map((creature) => ({ x: Math.round(creature.x), y: Math.round(creature.y) }));
       if (jay.state !== 'away') list.push({ x: Math.round(jay.x), y: Math.round(jay.y) });
       return list;
+    }
+
+    // A groundhog at its hole, as depth-sorted pieces: heaving dirt before it
+    // surfaces, then its body rising behind the hole's near rim.
+    function groundhogPieces(list, groundhog, clock, body) {
+      if (groundhog.state === 'mound') {
+        list.push({ sprite: Sprites.mound[Math.floor(clock * 8) % 2], x: groundhog.x - 8, y: groundhog.y - 4, depth: groundhog.y });
+      } else if (isUp(groundhog)) {
+        const showing = Math.round(Math.max(0, groundhog.rise) * body.height);
+        if (showing > 0) {
+          list.push({ sprite: body, x: groundhog.x - 8, y: groundhog.y - showing, clip: showing, depth: groundhog.y });
+          if (groundhog.carrying && showing > 3) {
+            // Held up beside its cheek, so the prize is visible as it sinks.
+            list.push({ sprite: Sprites.acorn, x: groundhog.x + 2, y: groundhog.y - showing + 3, clip: Math.min(Sprites.acorn.height, showing - 3), depth: groundhog.y + 0.05 });
+          }
+        }
+        list.push({ sprite: Sprites.holeFront, x: groundhog.x - 8, y: groundhog.y, depth: groundhog.y + 0.1 });
+      }
     }
 
     // Standing on the ground, sorted by depth with the scenery. `clip` draws only the top rows.
     function things(clock) {
       if (!active) return [];
       const list = squirrels.map((squirrel) => {
+        const poses = Sprites.greySquirrel[squirrel.facing];
         const hop = squirrel.moving ? [0, 1, 2, 1][Math.floor(squirrel.hop * 12) % 4] : 0;
         return {
-          sprite: Sprites.greySquirrel[squirrel.facing],
+          sprite: squirrel.moving ? poses.rest : Sprites.idleFrame(poses, squirrel.idle),
           x: Math.round(squirrel.x) - 8, y: Math.round(squirrel.y) - 15 - hop, depth: squirrel.y,
         };
       });
-      if (hog.state === 'mound') {
-        list.push({ sprite: Sprites.mound[Math.floor(clock * 8) % 2], x: hog.x - 8, y: hog.y - 4, depth: hog.y });
-      } else if (hogIsUp()) {
-        // The groundhog rises out of the hole; the hole's near rim is drawn over its base.
-        const showing = Math.round(Math.max(0, hog.rise) * Sprites.groundhog.height);
-        if (showing > 0) {
-          list.push({ sprite: Sprites.groundhog, x: hog.x - 8, y: hog.y - showing, clip: showing, depth: hog.y });
-          if (hog.carrying && showing > 3) {
-            // Held up beside its cheek, so the prize is visible as it sinks.
-            list.push({ sprite: Sprites.acorn, x: hog.x + 2, y: hog.y - showing + 3, clip: Math.min(Sprites.acorn.height, showing - 3), depth: hog.y + 0.05 });
-          }
-        }
-        list.push({ sprite: Sprites.holeFront, x: hog.x - 8, y: hog.y, depth: hog.y + 0.1 });
+      groundhogPieces(list, hog, clock, Sprites.groundhog);
+      for (const visitor of visitors) {
+        // A visitor glances from side to side while it is up.
+        groundhogPieces(list, visitor, clock, Sprites.groundhogLooks[Math.floor(visitor.looked / 0.45) % 4]);
       }
       return list;
     }
 
     // In the air, drawn over everything on the ground.
     function flyers() {
-      if (!active || jay.state === 'away') return [];
-      const x = Math.round(jay.x);
-      const y = Math.round(jay.y - jay.z);
-      const list = [{ sprite: Sprites.jay[jay.facing][Math.floor(jay.flap * 10) % 2], x: x - 8, y: y - 5 }];
-      if (jay.carrying) list.push({ sprite: Sprites.acorn, x: x - 4, y: y + 3 });
+      if (!active) return [];
+      const list = passers.map((bird) => ({
+        sprite: Sprites.jay[bird.facing][Math.floor(bird.flap * 10) % 2],
+        x: Math.round(bird.x) - 8,
+        y: Math.round(bird.y - bird.z + Math.sin(bird.flap * 3) * 1.5) - 5,
+      }));
+      if (jay.state !== 'away') {
+        const x = Math.round(jay.x);
+        const y = Math.round(jay.y - jay.z);
+        list.push({ sprite: Sprites.jay[jay.facing][Math.floor(jay.flap * 10) % 2], x: x - 8, y: y - 5 });
+        if (jay.carrying) list.push({ sprite: Sprites.acorn, x: x - 4, y: y + 3 });
+      }
       return list;
     }
 
     return {
       reset, update, decals, shadows, things, flyers,
-      // For tests: a live view of each rival's state.
-      inspect: () => ({ jay, hog, squirrels, holes }),
+      // For tests: a live view of each creature's state.
+      inspect: () => ({ jay, hog, squirrels, holes, passers, visitors }),
     };
   }
 

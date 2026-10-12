@@ -35,20 +35,37 @@ body {
   image-rendering: pixelated;
 }
 
+/* A row of text across the top, with the minimap tucked under its right end. */
 #hud {
   position: absolute;
   top: 0;
   right: 0;
   left: 0;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 10px calc(14px + env(safe-area-inset-left));
+  font-size: clamp(12px, 4vmin, 22px);
+  pointer-events: none;
+}
+
+#hud-row {
+  display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 10px calc(14px + env(safe-area-inset-left));
-  font-size: clamp(12px, 4vmin, 22px);
+  width: 100%;
   white-space: nowrap;
   text-shadow: 2px 2px 0 #000;
-  pointer-events: none;
+}
+
+/* Its size is set in game.js, to a whole number of screen pixels per map pixel. */
+#minimap {
+  border: 2px solid #2b1d16;
+  opacity: 0.92;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
 
 #mute {

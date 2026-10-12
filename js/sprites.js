@@ -39,6 +39,11 @@ const Sprites = (() => {
     x: '#1a120e', // inside a hole
   };
 
+  // A squirrel standing still waits IDLE_START seconds, then repeats a little
+  // routine every IDLE_CYCLE seconds: a burst of sniffs, a blink, an ear or tail flick.
+  const IDLE_START = 1;
+  const IDLE_CYCLE = 3.2;
+
   function canvas(w, h) {
     const c = document.createElement('canvas');
     c.width = w;
@@ -72,6 +77,20 @@ const Sprites = (() => {
   function slice(source, from, to) {
     const c = canvas(source.width, to - from);
     c.getContext('2d').drawImage(source, 0, -from);
+    return c;
+  }
+
+  // A copy of a sprite with one rectangle of it shifted by (dx, dy): a lifted
+  // head, a twitched ear. With `stretch` (for a part moving up) the row it
+  // leaves behind keeps its pixels, so the part looks raised, not cut off.
+  function nudged(source, x, y, w, h, dx, dy, stretch) {
+    const c = canvas(source.width, source.height);
+    const g = c.getContext('2d');
+    g.drawImage(source, 0, 0);
+    g.clearRect(x, y, w, h);
+    g.clearRect(x + dx, y + dy, w, h);
+    g.drawImage(source, x, y, w, h, x + dx, y + dy, w, h);
+    if (stretch) g.drawImage(source, x, y + h - 1, w, 1, x, y + h - 1, w, 1);
     return c;
   }
 
@@ -144,15 +163,36 @@ const Sprites = (() => {
     '................',
   ];
 
-  // One squirrel in all four facings; `overrides` recolours it.
+  // One squirrel in all four facings; `overrides` recolours it. Each facing has
+  // its resting pose plus the poses of the idle routine: head lifted to sniff,
+  // eyes shut, and a flick (the tail tip from the side, an ear from front or back).
   function squirrel(overrides) {
-    const right = fromText(SQUIRREL_RIGHT, overrides);
-    return {
-      right,
-      left: mirrored(right),
-      down: fromText(SQUIRREL_DOWN, overrides),
-      up: fromText(SQUIRREL_UP, overrides),
+    const eyesShut = Object.assign({}, overrides, { e: (overrides && overrides.O) || PALETTE.O });
+    const right = { rest: fromText(SQUIRREL_RIGHT, overrides), blink: fromText(SQUIRREL_RIGHT, eyesShut) };
+    right.sniff = nudged(right.rest, 9, 3, 7, 7, 0, -1, true);
+    right.flick = nudged(right.rest, 0, 2, 9, 4, 1, 0, false);
+    const left = {};
+    for (const pose of Object.keys(right)) left[pose] = mirrored(right[pose]);
+    const headOn = (rows) => {
+      const rest = fromText(rows, overrides);
+      return {
+        rest,
+        blink: fromText(rows, eyesShut),
+        sniff: nudged(rest, 0, 1, 16, 7, 0, -1, true),
+        flick: nudged(rest, 10, 1, 3, 2, 0, 1, false),
+      };
     };
+    return { right, left, down: headOn(SQUIRREL_DOWN), up: headOn(SQUIRREL_UP) };
+  }
+
+  // The pose for a squirrel that has stood still for `idle` seconds.
+  function idleFrame(poses, idle) {
+    if (idle < IDLE_START) return poses.rest;
+    const t = (idle - IDLE_START) % IDLE_CYCLE;
+    if (t < 0.48) return Math.floor(t / 0.12) % 2 === 0 ? poses.sniff : poses.rest;
+    if (t > 1.3 && t < 1.42) return poses.blink;
+    if ((t > 2.1 && t < 2.24) || (t > 2.36 && t < 2.5)) return poses.flick;
+    return poses.rest;
   }
 
   const acorn = fromText([
@@ -198,7 +238,7 @@ const Sprites = (() => {
   const jayRight = JAY.map((rows) => fromText(rows));
 
   // Groundhog, head and shoulders, as it stands up out of its hole.
-  const groundhog = fromText([
+  const GROUNDHOG = [
     '....kk....kk....',
     '...khhkkkkhhk...',
     '..khhhhhhhhhhk..',
@@ -209,7 +249,11 @@ const Sprites = (() => {
     '..kHhhcccchhHk..',
     '.kHHhkhcchkhHHk.',
     '.kHHhhhcchhhHHk.',
-  ]);
+  ];
+  const groundhog = fromText(GROUNDHOG);
+  // The same with its eyes turned to one side, for a groundhog having a look round.
+  const glancing = (eyes) => fromText(GROUNDHOG.map((row, y) => (y === 3 ? eyes : row)));
+  const groundhogLooks = [groundhog, glancing('..kehhhhhhehhk..'), groundhog, glancing('..khhehhhhhhek..')];
 
   const hole = fromText([
     '....dddddddd....',
@@ -240,6 +284,40 @@ const Sprites = (() => {
     ]),
   ];
 
+  // Hint arrows: one pointing right and one pointing down-right, turned and
+  // mirrored into all eight directions.
+  const ARROW_RIGHT = [
+    'kk.....',
+    'kyk....',
+    'kyyk...',
+    'kyyyk..',
+    'kyyyyk.',
+    'kyyyk..',
+    'kyyk...',
+    'kyk....',
+    'kk.....',
+  ];
+  const ARROW_DOWN_RIGHT = [
+    '......kk',
+    '.....kyk',
+    '....kyyk',
+    '...kyyyk',
+    '..kyyyyk',
+    '.kyyyyyk',
+    'kyyyyyyk',
+    'kkkkkkkk',
+  ];
+  const flipped = (rows) => rows.slice().reverse();
+  const mirroredRows = (rows) => rows.map((row) => row.split('').reverse().join(''));
+  // A quarter turn clockwise.
+  const turned = (rows) => rows[0].split('').map((_, x) => rows.map((row) => row[x]).reverse().join(''));
+  const arrowDown = turned(ARROW_RIGHT);
+  // Clockwise from "right", in eighths of a turn: the order Hud.hintArrows uses.
+  const arrows = [
+    ARROW_RIGHT, ARROW_DOWN_RIGHT, arrowDown, mirroredRows(ARROW_DOWN_RIGHT),
+    mirroredRows(ARROW_RIGHT), mirroredRows(flipped(ARROW_DOWN_RIGHT)), flipped(arrowDown), flipped(ARROW_DOWN_RIGHT),
+  ].map((rows) => fromText(rows));
+
   const FLOWER = [
     '..F..',
     '.FyF.',
@@ -260,16 +338,21 @@ const Sprites = (() => {
   ]);
 
   return {
+    IDLE_START,
+    IDLE_CYCLE,
     canvas,
     shadow,
     squirrel: squirrel(),
     greySquirrel: squirrel({ o: '#a3a3ae', O: '#6f6f7c', c: '#eeeef2' }),
+    idleFrame,
     acorn,
     jay: { right: jayRight, left: jayRight.map(mirrored) },
     groundhog,
+    groundhogLooks,
     hole,
     holeFront: slice(hole, 3, 6),
     mound,
+    arrows,
     flowers: {
       flowerRed: fromText(FLOWER, { F: '#e2504a' }),
       flowerYellow: fromText(FLOWER, { F: '#f4d24a', y: '#ffffff' }),
