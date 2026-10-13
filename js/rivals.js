@@ -14,12 +14,15 @@ const Rivals = (() => {
   const TUNING = {
     keepClear: 45,          // thieves ignore acorns this close to the player
     jay: {
-      firstVisit: 10,       // delay before the first one arrives
-      gap: [16, 26],        // rest between visits
+      firstVisit: 8,        // delay before the first one arrives
+      gap: [12, 20],        // rest between visits
       hover: 1.6,           // warning time circling over the acorn
       scare: 34,            // it gives up if the player is this close at the swoop
       speed: 130,
       height: 46,
+      inSight: 0.9,         // how often it picks an acorn the player can see, when there is one...
+      standOff: 60,         // ...though never one this close to the player
+      lead: 3.2,            // seconds ahead it reckons the player will be by the time it swoops
     },
     groundhog: {
       firstVisit: 18,
@@ -103,6 +106,29 @@ const Rivals = (() => {
       return free.length ? free[Math.floor(world.random() * free.length)] : null;
     }
 
+    // The jay likes an audience. Mostly it goes for an acorn that will be on
+    // screen when it swoops (though not one right beside the player), so its
+    // thefts can be seen and fought off instead of all happening out of sight.
+    function pickJayTarget(lead) {
+      const tuning = TUNING.jay;
+      if (world.random() < tuning.inSight) {
+        // Where the player, and so the screen, should be by the time it swoops, `lead` seconds on.
+        const soon = comingView(world.view(), lead);
+        const there = { x: player.x + drift.x * lead, y: player.y + drift.y * lead };
+        const open = world.acorns().filter((acorn) => !acorn.claimedBy
+          && !near(acorn, player, tuning.standOff) && !near(acorn, there, tuning.standOff)
+          && acorn.x > soon.x + 12 && acorn.x < soon.x + soon.w - 12
+          && acorn.y > soon.y + 26 && acorn.y < soon.y + soon.h - 8);
+        if (open.length) {
+          // One of the few nearest that spot, so it happens in plain view.
+          const reach = (acorn) => Math.hypot(acorn.x - there.x, acorn.y - there.y);
+          open.sort((a, b) => reach(a) - reach(b));
+          return open[Math.floor(world.random() * Math.min(3, open.length))];
+        }
+      }
+      return pickTarget();
+    }
+
     function claim(rival, acorn) {
       rival.target = acorn;
       acorn.claimedBy = rival;
@@ -179,14 +205,18 @@ const Rivals = (() => {
       if (jay.state === 'away') {
         jay.timer -= dt;
         if (jay.timer > 0) return;
-        const acorn = pickTarget();
+        const acorn = pickJayTarget(tuning.lead);
         if (!acorn) {
           jay.timer = 2;
           return;
         }
         claim(jay, acorn);
+        jay.changedMind = false;
         jay.side = world.random() < 0.5 ? -1 : 1;
-        jay.x = acorn.x + jay.side * 300;
+        // It flies in from just off screen on one side: seen arriving, but not long about it.
+        const view = world.view();
+        const toEdge = jay.side > 0 ? view.x + view.w + 24 - acorn.x : acorn.x - (view.x - 24);
+        jay.x = acorn.x + jay.side * Math.max(140, Math.min(300, toEdge));
         jay.y = acorn.y - 60;
         jay.z = tuning.height;
         jay.carrying = false;
@@ -194,6 +224,20 @@ const Rivals = (() => {
       } else if (jay.state === 'approach') {
         if (jay.target.gone) return jayLeaves();
         if (flyTowards(jay, jay.target.x + jay.side * 16, jay.target.y, tuning.speed * dt)) {
+          // If the player has wandered off in the meantime, it tries once for an
+          // acorn they can see now, and flies on to that instead.
+          const view = world.view();
+          const onScreen = (acorn) => acorn.x > view.x + 12 && acorn.x < view.x + view.w - 12
+            && acorn.y > view.y + 26 && acorn.y < view.y + view.h - 8;
+          if (!jay.changedMind && !onScreen(jay.target)) {
+            jay.changedMind = true;
+            const better = pickJayTarget(tuning.hover);
+            if (better && onScreen(better)) {
+              release(jay);
+              claim(jay, better);
+              return;
+            }
+          }
           jay.state = 'hover';
           jay.timer = tuning.hover;
           jay.angle = jay.side > 0 ? 0 : Math.PI;
@@ -451,10 +495,9 @@ const Rivals = (() => {
       }
     }
 
-    // The part of the park that will be on screen a moment from now, given
+    // The part of the park that will be on screen `lead` seconds from now, given
     // where the player is heading: the view slid along, but not past the hedge.
-    function comingView(view) {
-      const lead = TUNING.extras.popUp.lead;
+    function comingView(view, lead) {
       const slide = (from, by, span) => (span >= level.size ? from : Math.min(level.size - span, Math.max(0, from + by)));
       return { x: slide(view.x, drift.x * lead, view.w), y: slide(view.y, drift.y * lead, view.h), w: view.w, h: view.h };
     }
@@ -465,7 +508,7 @@ const Rivals = (() => {
     function popUpSpot(view) {
       const tuning = TUNING.extras.popUp;
       const ahead = { x: player.x + drift.x * tuning.lead, y: player.y + drift.y * tuning.lead };
-      const soon = comingView(view);
+      const soon = comingView(view, TUNING.extras.popUp.lead);
       const speed = Math.hypot(drift.x, drift.y);
       for (let attempt = 0; attempt < 16; attempt++) {
         let spot;
@@ -524,7 +567,7 @@ const Rivals = (() => {
       }
       // A visitor heaves up a mound, rises, looks about and sinks; then it may
       // wait under ground and come up again from the same hole.
-      const soon = comingView(view);
+      const soon = comingView(view, TUNING.extras.popUp.lead);
       const outside = (spot, rect) => spot.x < rect.x - 24 || spot.x > rect.x + rect.w + 24
         || spot.y < rect.y - 24 || spot.y > rect.y + rect.h + 24;
       for (const visitor of visitors) {

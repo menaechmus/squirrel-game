@@ -162,11 +162,14 @@
     for (const who of Object.keys(counts)) counts[who] = 0;
     particles = [];
     time = 0;
+    if (auto) auto.noclips = 0;   // the test hook reports stalls per round
     state = 'playing';
     rivals.reset();
     Input.release();
     el('start').hidden = true;
     el('over').hidden = true;
+    el('about').hidden = true;
+    el('info').hidden = true;   // the About button is only for the start and end screens
     el('hud').hidden = false;
     updateHud();
     measureHud();
@@ -223,7 +226,10 @@
     const best = readBest();
     if (counts.you > best) saveBest(counts.you);
     el('best').textContent = counts.you > best ? 'New best haul!' : `Best haul: ${best}`;
+    // The end screen repeats the score and time, so the HUD makes way for the About button.
+    el('hud').hidden = true;
     el('over').hidden = false;
+    el('info').hidden = false;
     el('again').focus();
     if (auto) {
       document.body.dataset.result = `you=${counts.you} jays=${counts.jays} groundhogs=${counts.groundhogs} squirrels=${counts.squirrels} total=${total} time=${time.toFixed(1)} noclips=${auto.noclips}`;
@@ -464,6 +470,16 @@
   el('mute').addEventListener('click', () => {
     muted = !muted;
     el('mute').textContent = muted ? 'Sound off' : 'Sound on';
+  });
+  // The About panel (name and version) opens over the start or end screen.
+  function showAbout(open) {
+    el('about').hidden = !open;
+    el(open ? 'close-about' : 'info').focus();
+  }
+  el('info').addEventListener('click', () => showAbout(true));
+  el('close-about').addEventListener('click', () => showAbout(false));
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !el('about').hidden) showAbout(false);
   });
   window.addEventListener('resize', resize);
 

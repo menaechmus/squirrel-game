@@ -150,6 +150,29 @@ body {
   box-shadow: 0 2px 0 #6a4322;
 }
 
+/* The small "i" in the corner of the start and end screens, and the About panel it opens. */
+#info {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  color: #f0c670;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid #f0c670;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* Solid, so the screen it opens over doesn't show through. */
+#about {
+  background: #10221a;
+}
+
 /* Touch joystick: appears where the thumb lands. */
 #stick {
   position: absolute;

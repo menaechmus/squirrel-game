@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#1d2b1a">
 <title>Squirrel Game</title>
-<link rel="stylesheet" href="style.css">
+<!-- The version appears in the About panel and as ?v= on every file below.
+     Change them all together for each release, so a browser holding old
+     files fetches a matching new set. -->
+<link rel="stylesheet" href="style.css?v=1.4">
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -37,13 +40,22 @@
   <button id="again" type="button">Play again</button>
 </div>
 
-<script src="js/sprites.js"></script>
-<script src="js/scenery.js"></script>
-<script src="js/effects.js"></script>
-<script src="js/level.js"></script>
-<script src="js/input.js"></script>
-<script src="js/hud.js"></script>
-<script src="js/rivals.js"></script>
-<script src="js/game.js"></script>
+<button id="info" type="button" aria-label="About this game">i</button>
+
+<div id="about" class="panel" hidden>
+  <h1>Squirrel Game</h1>
+  <p id="version">Version 1.4 &middot; 13 October 2026</p>
+  <p class="dim">New in this version: 68 acorns, blue jays that swoop where you can see them, and this panel.</p>
+  <button id="close-about" type="button">Close</button>
+</div>
+
+<script src="js/sprites.js?v=1.4"></script>
+<script src="js/scenery.js?v=1.4"></script>
+<script src="js/effects.js?v=1.4"></script>
+<script src="js/level.js?v=1.4"></script>
+<script src="js/input.js?v=1.4"></script>
+<script src="js/hud.js?v=1.4"></script>
+<script src="js/rivals.js?v=1.4"></script>
+<script src="js/game.js?v=1.4"></script>
 </body>
 </html>
