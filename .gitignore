@@ -1,3 +1,6 @@
 # Godot 4 cache and editor state
 godot-3d/.godot/
 *.tmp
+
+# Test tools kept on this computer only
+local-tests/
