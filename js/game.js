@@ -59,7 +59,10 @@
   let audio = null;
   let muted = false;
 
-  const rivals = Rivals.create({ level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView, puff });
+  const rivals = Rivals.create({
+    level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView, puff,
+    wind: (x, y) => effects.lean(x, y, clock),
+  });
 
   // ---- screen ----
 
@@ -234,8 +237,11 @@
     if (auto) {
       document.body.dataset.result = `you=${counts.you} jays=${counts.jays} groundhogs=${counts.groundhogs} squirrels=${counts.squirrels} total=${total} time=${time.toFixed(1)} noclips=${auto.noclips}`;
       if (params.has('restart')) {
-        el('again').click();
-        document.body.dataset.restart = `${el('acorns').textContent} ${state} over-hidden=${el('over').hidden}`;
+        // After this update is over: a round can end part-way through one, and Play again resets the rivals.
+        setTimeout(() => {
+          el('again').click();
+          document.body.dataset.restart = `${el('acorns').textContent} ${state} over-hidden=${el('over').hidden}`;
+        }, 0);
       }
       auto.speed = 0;
     }

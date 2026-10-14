@@ -237,6 +237,43 @@ const Sprites = (() => {
   ];
   const jayRight = JAY.map((rows) => fromText(rows));
 
+  // Blue jay sitting, facing right, wings folded. The top row is spare, for
+  // the pose with its head raised.
+  const JAY_SITTING = [
+    '............',
+    '.......k....',
+    '......kJk...',
+    '.....kJJJk..',
+    '.....kJweJkk',
+    '....kJJwwwk.',
+    '...kJJjkkwk.',
+    '..kJJjjJwwk.',
+    '.kJJjjJJwwk.',
+    'kJJJkJJwwk..',
+    'kJJk.kkkkk..',
+    '.kk...k.k...',
+  ];
+  // The same bird looking back over its shoulder: only the head rows differ.
+  const JAY_LOOKING_BACK = [
+    '............',
+    '......k.....',
+    '.....kJk....',
+    '....kJJJk...',
+    '..kkJewJk...',
+    '....kwwJJk..',
+  ];
+  function sittingJay() {
+    const rest = fromText(JAY_SITTING);
+    const poses = {
+      rest,
+      turned: fromText(JAY_LOOKING_BACK.concat(JAY_SITTING.slice(JAY_LOOKING_BACK.length))),
+      up: nudged(rest, 4, 1, 8, 5, 0, -1, true),
+    };
+    const left = {};
+    for (const pose of Object.keys(poses)) left[pose] = mirrored(poses[pose]);
+    return { right: poses, left };
+  }
+
   // Groundhog, head and shoulders, as it stands up out of its hole.
   const GROUNDHOG = [
     '....kk....kk....',
@@ -254,6 +291,25 @@ const Sprites = (() => {
   // The same with its eyes turned to one side, for a groundhog having a look round.
   const glancing = (eyes) => fromText(GROUNDHOG.map((row, y) => (y === 3 ? eyes : row)));
   const groundhogLooks = [groundhog, glancing('..kehhhhhhehhk..'), groundhog, glancing('..khhehhhhhhek..')];
+
+  // Groundhog out of its hole, on all fours and facing right. The two frames
+  // differ only in the legs.
+  const GROUNDHOG_WALKING = [
+    '......kkkkkk........',
+    '....kkhhhhhhkk.kk...',
+    '...khhhhhhhhhhkhhkk.',
+    '..khhhhhhhhhhhhhhhhk',
+    '.kHhhhhhhhhhhhhhehhk',
+    'kHHhhhhhhhhhhhhhhhck',
+    'kHHhhhhhhhhhhhhhcckk',
+    'kHHhhhhhhhhhhhhccck.',
+    '.kHHhhhhhhhhhhkkkk..',
+  ];
+  const GROUNDHOG_STEPS = [
+    ['..kHHhkkkkkhhhk.....', '..kHHk.....khhk.....', '..kkkk.....kkkk.....'],
+    ['..kkkHHkkhhkkkk.....', '....kHHk.khhk.......', '....kkkk.kkkk.......'],
+  ];
+  const groundhogWalkRight = GROUNDHOG_STEPS.map((legs) => fromText(GROUNDHOG_WALKING.concat(legs)));
 
   const hole = fromText([
     '....dddddddd....',
@@ -347,8 +403,10 @@ const Sprites = (() => {
     idleFrame,
     acorn,
     jay: { right: jayRight, left: jayRight.map(mirrored) },
+    jaySitting: sittingJay(),
     groundhog,
     groundhogLooks,
+    groundhogWalk: { right: groundhogWalkRight, left: groundhogWalkRight.map(mirrored) },
     hole,
     holeFront: slice(hole, 3, 6),
     mound,

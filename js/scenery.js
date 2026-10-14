@@ -361,14 +361,34 @@ const Scenery = (() => {
 
   // ---- the catalogue ----
 
+  // Where a bird could sit on a tree: the middle of the top row of a frame, as
+  // pixels right of the trunk line (x) and above the base (y).
+  function crownTop(frame) {
+    const { width, height } = frame;
+    const pixels = frame.getContext('2d').getImageData(0, 0, width, height).data;
+    for (let y = 0; y < height; y++) {
+      let first = -1;
+      let last = -1;
+      for (let x = 0; x < width; x++) {
+        if (pixels[(x + y * width) * 4 + 3] === 0) continue;
+        if (first < 0) first = x;
+        last = x;
+      }
+      if (first >= 0) return { x: Math.round((first + last + 1) / 2) - (width >> 1), y: height - y };
+    }
+    return { x: 0, y: height };
+  }
+
   // Each entry: frames to draw, which frame is "no wind" (rest), how strongly it
   // answers the wind (gain), its ground shadow, whether its top can hide things,
-  // and the colour of leaves it sheds in a gust.
+  // whether a bird can perch on it (then `tops` is its crown top in each
+  // frame), and the colour of leaves it sheds in a gust.
   const props = {};
   function define(name, frames, options) {
     props[name] = Object.assign({ frames, rest: 0, gain: 0 }, options);
+    if (props[name].perch) props[name].tops = frames.map(crownTop);
   }
-  const TREE = { rest: 1, gain: 1, hides: true };
+  const TREE = { rest: 1, gain: 1, hides: true, perch: true };
 
   define('oak0', broadleaf({ seed: 101, rx: 19, ry: 14, trunk: 9, girth: 4, ramp: RAMPS.leaf }), { ...TREE, shadow: [34, 10], leaves: RAMPS.leaf[1] });
   define('oak1', broadleaf({ seed: 102, rx: 17, ry: 13, trunk: 8, girth: 4, ramp: RAMPS.leaf }), { ...TREE, shadow: [30, 9], leaves: RAMPS.leaf[1] });
@@ -382,7 +402,7 @@ const Scenery = (() => {
   define('pine0', conifer({ seed: 151, tiers: 4, base: 5, spread: 3, ramp: RAMPS.pine }), { ...TREE, shadow: [22, 7] });
   define('pine1', conifer({ seed: 152, tiers: 3, base: 5, spread: 3, ramp: RAMPS.pine }), { ...TREE, shadow: [18, 6] });
   define('spruce0', conifer({ seed: 153, tiers: 5, base: 4, spread: 2.2, ramp: RAMPS.spruce }), { ...TREE, shadow: [22, 7] });
-  define('dead0', deadTree(), { rest: 1, gain: 1, shadow: [12, 4] });
+  define('dead0', deadTree(), { rest: 1, gain: 1, perch: true, shadow: [12, 4] });
 
   define('boulder0', rock({ seed: 201, w: 24, h: 18, ramp: RAMPS.granite, shape: boulder(24, 18), facets: 7, speckle: 0.1 }), { shadow: [26, 7] });
   define('boulder1', rock({ seed: 202, w: 18, h: 13, ramp: RAMPS.granite, shape: boulder(18, 13), facets: 5, speckle: 0.1 }), { shadow: [20, 6] });
@@ -406,11 +426,20 @@ const Scenery = (() => {
   }
   define('mushroom', [Sprites.mushroom], {});
 
+  // Which frame of a prop shows for a given wind strength.
+  function frameIndex(art, lean) {
+    if (art.frames.length === 1) return 0;
+    return Math.max(0, Math.min(art.frames.length - 1, Math.round(art.rest + lean * art.gain)));
+  }
+
   // The frame of a prop to draw for a given wind strength.
   function frame(art, lean) {
-    if (art.frames.length === 1) return art.frames[0];
-    const index = Math.round(art.rest + lean * art.gain);
-    return art.frames[Math.max(0, Math.min(art.frames.length - 1, index))];
+    return art.frames[frameIndex(art, lean)];
+  }
+
+  // The top of a tree's crown in that same frame, for a bird sitting on it.
+  function top(art, lean) {
+    return art.tops[frameIndex(art, lean)];
   }
 
   // ---- ground, pond, clouds ----
@@ -533,6 +562,7 @@ const Scenery = (() => {
   return {
     props,
     frame,
+    top,
     buildGround,
     buildPond,
     clouds: [cloud(1, 250, 120), cloud(2, 200, 110), cloud(3, 280, 140), cloud(4, 220, 100), cloud(5, 180, 120)],
