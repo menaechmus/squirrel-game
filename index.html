@@ -8,13 +8,14 @@
 <!-- The version appears in the About panel and as ?v= on every file below.
      Change them all together for each release, so a browser holding old
      files fetches a matching new set. -->
-<link rel="stylesheet" href="style.css?v=1.10">
+<link rel="stylesheet" href="style.css?v=1.11">
 </head>
 <body>
 <canvas id="game"></canvas>
 
 <div id="hud" hidden>
   <div id="hud-row">
+    <button id="pause" type="button" aria-label="Pause"></button>
     <span id="acorns">Acorns 0</span>
     <button id="mute" type="button" aria-label="Sound" aria-pressed="true"></button>
     <span id="time">0:00.0</span>
@@ -26,10 +27,14 @@
 
 <div id="start" class="panel">
   <h1>Squirrel Game</h1>
-  <p>Gather more acorns than anyone else before the park is picked clean.</p>
-  <p class="dim">Arrows point to the nearest acorns. Stay close to one to scare off a thieving jay or groundhog.</p>
+  <p>Gather acorns in the park before the jays, groundhogs and grey squirrels get them.</p>
+  <p class="dim"><b>Race:</b> get more than anyone else before the park is picked clean. <b>Explore:</b> no clock; acorns keep growing back.</p>
   <p id="help" class="dim"></p>
-  <button id="play" type="button" autofocus>Play</button>
+  <div class="choices">
+    <button id="play" type="button" autofocus>Race</button>
+    <button id="explore" type="button">Explore</button>
+  </div>
+  <button id="howto" type="button" class="small">How to play</button>
 </div>
 
 <div id="over" class="panel" hidden>
@@ -38,6 +43,7 @@
   <p id="rivals" class="dim"></p>
   <p id="best" class="dim"></p>
   <button id="again" type="button">Play again</button>
+  <button id="over-menu" type="button" class="small">Main menu</button>
 </div>
 
 <button id="info" type="button" aria-label="About this game">i</button>
@@ -45,19 +51,47 @@
 
 <div id="about" class="panel" hidden>
   <h1>Squirrel Game</h1>
-  <p id="version">Version 1.10 &middot; 15 October 2026</p>
-  <p class="dim">New in this version: quiet sounds of the park round you (water, the waterfall, leaves in a gust, jays singing, groundhogs digging) and a speaker button to turn sound on or off.</p>
+  <p id="version">Version 1.11 &middot; 15 October 2026</p>
+  <p class="dim">New in this version: Explore, where acorns keep growing back and there is no clock; a pause menu with Restart and Help; copses of trees; and two dirt paths crossing the park.</p>
   <button id="close-about" type="button">Close</button>
 </div>
 
-<script src="js/sprites.js?v=1.10"></script>
-<script src="js/scenery.js?v=1.10"></script>
-<script src="js/effects.js?v=1.10"></script>
-<script src="js/level.js?v=1.10"></script>
-<script src="js/input.js?v=1.10"></script>
-<script src="js/hud.js?v=1.10"></script>
-<script src="js/rivals.js?v=1.10"></script>
-<script src="js/sound.js?v=1.10"></script>
-<script src="js/game.js?v=1.10"></script>
+<div id="paused" class="panel" hidden>
+  <h1>Paused</h1>
+  <button id="resume" type="button">Resume</button>
+  <button id="restart" type="button" class="small">Restart</button>
+  <button id="help-from-pause" type="button" class="small">Help</button>
+  <button id="to-menu" type="button" class="small">Main menu</button>
+</div>
+
+<div id="rules" class="panel" hidden>
+  <h1>How to play</h1>
+  <div class="text">
+    <h2>The aim</h2>
+    <p><b>Race:</b> gather more acorns than the blue jays, groundhogs and grey squirrels before the park is picked clean. Your best haul is kept.</p>
+    <p><b>Explore:</b> no clock and no end. Whenever an acorn is taken, another grows somewhere out of sight, so wander the park and gather as many as you like. Leave from the pause menu.</p>
+    <h2>Moving</h2>
+    <p>On a phone or tablet, put a finger down anywhere and drag: a stick appears under it. On a computer, use the arrow keys or WASD, or drag with the mouse.</p>
+    <p>The pause button (or Esc or P) stops the game and opens a menu to resume, restart, read this, or go back to the start. The speaker turns sound on and off.</p>
+    <h2>The thieves</h2>
+    <p><b>Blue jay:</b> circles over an acorn with a chirp, then swoops down for it. Stand by the acorn and it gives up.</p>
+    <p><b>Groundhog:</b> heaves up a mound of dirt with a rumble, peeks out, then climbs out for the acorn. Get close and it ducks back down.</p>
+    <p><b>Grey squirrel:</b> can't be scared off, but is slower than you. Get there first.</p>
+    <h2>Finding acorns</h2>
+    <p>Blinking arrows at the edge of the screen point to the nearest acorns, and the map in the corner shows where you are.</p>
+    <p>The stream can only be crossed on the log bridges.</p>
+  </div>
+  <button id="close-rules" type="button">Close</button>
+</div>
+
+<script src="js/sprites.js?v=1.11"></script>
+<script src="js/scenery.js?v=1.11"></script>
+<script src="js/effects.js?v=1.11"></script>
+<script src="js/level.js?v=1.11"></script>
+<script src="js/input.js?v=1.11"></script>
+<script src="js/hud.js?v=1.11"></script>
+<script src="js/rivals.js?v=1.11"></script>
+<script src="js/sound.js?v=1.11"></script>
+<script src="js/game.js?v=1.11"></script>
 </body>
 </html>

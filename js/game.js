@@ -13,6 +13,10 @@
   const BEST_KEY = 'squirrel-game-best-haul';
   const RIVAL_NAMES = { jays: 'Blue jays', groundhogs: 'Groundhogs', squirrels: 'Grey squirrels' };
   const SOUND_KEY = 'squirrel-game-sound';   // 'off' once the player has turned sound off
+  const GROW_BACK = [1, 3];    // in Explore, seconds before a taken acorn grows back somewhere else
+  // The pause button's picture: two upright bars, 14 by 10 pixels like the speaker.
+  const PAUSE_BARS = ['....##..##....', '....##..##....', '....##..##....', '....##..##....', '....##..##....',
+    '....##..##....', '....##..##....', '....##..##....', '....##..##....', '....##..##....'];
   // The speaker on the sound buttons, a pixel picture in three layers, each row
   // marking its pixels with '#': the speaker, its sound waves (shown with sound
   // on) and a cross (with sound off). 14 by 10 pixels.
@@ -38,16 +42,24 @@
 
   // Test hooks: ?autoplay=N plays by itself at N times speed, &pace=0.4 slows
   // the test squirrel to 40% (closer to a person; 0 parks it), &seed=7 varies
-  // the rivals' luck.
+  // the rivals' luck, &mode=explore plays Explore instead of the race.
   const params = new URLSearchParams(location.search);
   const auto = params.has('autoplay')
-    ? { speed: Number(params.get('autoplay')) || 1, pace: params.has('pace') ? Number(params.get('pace')) : 1, target: null, way: null, leg: 0, best: Infinity, stalled: 0, noclip: 0, noclips: 0 }
+    ? {
+      speed: Number(params.get('autoplay')) || 1, pace: params.has('pace') ? Number(params.get('pace')) : 1, target: null, way: null, leg: 0, best: Infinity, stalled: 0, noclip: 0, noclips: 0,
+      grown: [], fewest: Infinity, most: 0, reported: -1,   // Explore: acorns grown back, and how many lay about at the fewest and most
+    }
     : null;
   const random = seededRandom(params.has('seed') ? Number(params.get('seed')) : auto ? 1 : Date.now());
 
   const player = { x: level.spawn.x, y: level.spawn.y, facing: 'down', moving: false, hop: 0, idle: 0, sniffRound: -1, joy: 0 };
   const counts = { you: 0, jays: 0, groundhogs: 0, squirrels: 0 };
   let state = 'menu';   // 'menu' | 'playing' | 'over'
+  let mode = 'race';    // 'race': the park empties and the round ends; 'explore': acorns grow back, no clock
+  let paused = false;
+  let growing = [];     // in Explore, when each taken acorn grows back (seconds of `time`)
+  let nextPhase = 0;    // each acorn bobs a little out of step with the rest
+  let helpFrom = null;  // the panel the help was opened from, to go back to
   let acorns = [];
   let particles = [];
   let time = 0;
@@ -144,6 +156,11 @@
       + `<path d="${path(SPEAKER.body)}"/><path class="waves" d="${path(SPEAKER.waves)}"/><path class="cross" d="${path(SPEAKER.cross)}"/></svg>`;
   }
 
+  function pausePicture() {
+    const path = PAUSE_BARS.map((row, y) => [...row].map((pixel, x) => (pixel === '#' ? `M${x} ${y}h1v1h-1z` : '')).join('')).join('');
+    return `<svg viewBox="0 0 14 10" aria-hidden="true" shape-rendering="crispEdges"><path d="${path}"/></svg>`;
+  }
+
   // Both sound buttons (in the top bar, and on the start and end screens) show the same thing.
   function showSoundChoice() {
     for (const id of ['mute', 'mute-menu']) {
@@ -177,11 +194,16 @@
   }
 
   function updateHud() {
-    el('acorns').textContent = `Acorns ${counts.you} \u00b7 ${acorns.length} left`;   // \u00b7 is a middle dot
+    // \u00b7 is a middle dot. Explore has no clock and no end, so only what you have gathered.
+    el('acorns').textContent = mode === 'explore' ? `Acorns ${counts.you}` : `Acorns ${counts.you} \u00b7 ${acorns.length} left`;
     el('time').textContent = formatTime(time);
   }
 
-  function start() {
+  // A fresh round of the race, or a fresh Explore.
+  function start(newMode = mode) {
+    mode = newMode;
+    paused = false;
+    growing = [];
     player.x = level.spawn.x;
     player.y = level.spawn.y;
     player.facing = 'down';
@@ -189,6 +211,7 @@
     player.sniffRound = -1;
     player.joy = 0;
     acorns = level.acorns.map((acorn, index) => ({ x: acorn.x, y: acorn.y, phase: index, claimedBy: null, gone: false }));
+    nextPhase = acorns.length;
     for (const who of Object.keys(counts)) counts[who] = 0;
     particles = [];
     time = 0;
@@ -196,12 +219,12 @@
     state = 'playing';
     rivals.reset();
     Input.release();
-    el('start').hidden = true;
-    el('over').hidden = true;
-    el('about').hidden = true;
+    for (const panel of ['start', 'over', 'about', 'paused', 'rules']) el(panel).hidden = true;
     el('info').hidden = true;   // the About button is only for the start and end screens
     el('mute-menu').hidden = true;   // in play, the sound button is in the top bar
     el('hud').hidden = false;
+    el('time').hidden = mode === 'explore';
+    if (sounds.context() && !document.hidden) sounds.resume();
     updateHud();
     measureHud();
   }
@@ -236,7 +259,27 @@
       sound('stolen', acorn);
     }
     updateHud();
-    if (acorns.length === 0) finish();
+    if (mode === 'explore') growing.push(time + GROW_BACK[0] + random() * (GROW_BACK[1] - GROW_BACK[0]));
+    else if (acorns.length === 0) finish();
+  }
+
+  // In Explore, each taken acorn grows back a few seconds later somewhere out
+  // of sight (by the same rules as the park's own acorns), so the park keeps
+  // about as many as it started with.
+  function growAcorns() {
+    const due = growing.filter((when) => when <= time);
+    if (!due.length) return;
+    growing = growing.filter((when) => when > time);
+    for (let i = 0; i < due.length; i++) {
+      const spot = level.newAcornSpot(random, acorns, cameraView());
+      if (!spot) {
+        growing.push(time + 1);   // nowhere suitable just now: try again in a second
+        continue;
+      }
+      acorns.push({ x: spot.x, y: spot.y, phase: nextPhase++, claimedBy: null, gone: false });
+      if (auto) auto.grown.push([spot.x, spot.y]);
+    }
+    updateHud();
   }
 
   // The park is empty: show who got what.
@@ -345,6 +388,7 @@
   }
 
   function update(dt) {
+    if (paused) return;   // everything stands still, the clock too
     clock += dt;
     effects.update(dt, clock);
     for (const particle of particles) {
@@ -388,7 +432,23 @@
     for (const acorn of acorns.slice()) {
       if (Math.hypot(acorn.x - player.x, acorn.y - 3 - player.y) <= PICKUP_RADIUS) takeAcorn(acorn, 'you');
     }
+    if (mode === 'explore') {
+      growAcorns();
+      if (auto) reportExplore();
+    }
     updateHud();
+  }
+
+  // The Explore test hook: once a second of play, how it is going, on <body data-explore>.
+  function reportExplore() {
+    auto.fewest = Math.min(auto.fewest, acorns.length);
+    auto.most = Math.max(auto.most, acorns.length);
+    if (time - auto.reported < 1) return;
+    auto.reported = time;
+    document.body.dataset.explore = JSON.stringify({
+      time: Math.round(time), state, you: counts.you, jays: counts.jays, groundhogs: counts.groundhogs, squirrels: counts.squirrels,
+      acorns: acorns.length, fewest: auto.fewest, most: auto.most, grown: auto.grown.length, lastGrown: auto.grown.slice(-3),
+    });
   }
 
   // ---- draw ----
@@ -522,8 +582,71 @@
   el('help').textContent = window.matchMedia('(pointer: coarse)').matches
     ? 'Drag anywhere on the screen to move.'
     : 'Move with WASD or the arrow keys, or drag with the mouse.';
-  el('play').addEventListener('click', () => { sounds.unlock(); start(); });
-  el('again').addEventListener('click', () => { sounds.unlock(); start(); });
+  el('play').addEventListener('click', () => { sounds.unlock(); start('race'); });
+  el('explore').addEventListener('click', () => { sounds.unlock(); start('explore'); });
+  el('again').addEventListener('click', () => { sounds.unlock(); start('race'); });
+
+  // ---- pause, help, and back to the start ----
+
+  // Everything stops (the squirrel, the animals, the clock, the sounds) under a menu.
+  function pause() {
+    if (state !== 'playing' || paused) return;
+    paused = true;
+    Input.release();
+    sounds.pause();
+    el('paused').hidden = false;
+    el('resume').focus();
+  }
+
+  function resume() {
+    if (!paused) return;
+    paused = false;
+    for (const panel of ['paused', 'rules']) el(panel).hidden = true;
+    if (!document.hidden) sounds.resume();
+  }
+
+  // Back to the start screen, to choose the race or Explore again.
+  function toMenu() {
+    state = 'menu';
+    paused = false;
+    growing = [];
+    acorns = [];
+    particles = [];
+    rivals.reset();
+    Input.release();
+    sounds.pause();   // quiet behind the start screen; the next round brings the park's sounds back
+    for (const panel of ['over', 'paused', 'rules', 'about', 'hud']) el(panel).hidden = true;
+    el('start').hidden = false;
+    el('info').hidden = false;
+    el('mute-menu').hidden = false;
+    el('play').focus();
+  }
+
+  // The help panel opens over the start screen or the pause menu, and closes back to it.
+  function showHelp(from) {
+    helpFrom = from;
+    el(from).hidden = true;
+    el('rules').hidden = false;
+    // Focus the Close button for the keyboard, but read from the top: focusing scrolls to it otherwise.
+    el('close-rules').focus({ preventScroll: true });
+    el('rules').scrollTop = 0;
+  }
+
+  function closeHelp() {
+    el('rules').hidden = true;
+    el(helpFrom).hidden = false;
+    el(helpFrom === 'paused' ? 'resume' : 'howto').focus();
+  }
+
+  el('pause').innerHTML = pausePicture();
+  el('pause').addEventListener('click', pause);
+  el('resume').addEventListener('click', resume);
+  el('restart').addEventListener('click', () => start());
+  el('to-menu').addEventListener('click', toMenu);
+  el('over-menu').addEventListener('click', toMenu);
+  el('howto').addEventListener('click', () => showHelp('start'));
+  el('help-from-pause').addEventListener('click', () => showHelp('paused'));
+  el('close-rules').addEventListener('click', closeHelp);
   sounds.setOn(readSoundChoice());
   for (const id of ['mute', 'mute-menu']) {
     el(id).innerHTML = speakerPicture();
@@ -534,8 +657,16 @@
     });
   }
   showSoundChoice();
-  // A hidden page (another tab, another app) goes quiet until it comes back.
-  document.addEventListener('visibilitychange', () => (document.hidden ? sounds.pause() : sounds.resume()));
+  // A hidden page (another tab, another app) goes quiet until it comes back;
+  // a round in play pauses itself and waits there.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      pause();
+      sounds.pause();
+    } else if (!paused) {
+      sounds.resume();
+    }
+  });
   // The About panel (name and version) opens over the start or end screen.
   function showAbout(open) {
     el('about').hidden = !open;
@@ -543,12 +674,15 @@
   }
   el('info').addEventListener('click', () => showAbout(true));
   el('close-about').addEventListener('click', () => showAbout(false));
+  // Esc closes whatever is open on top; in play, Esc or P pauses and resumes.
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !el('about').hidden) showAbout(false);
+    if (event.key === 'Escape' && !el('rules').hidden) closeHelp();
+    else if (event.key === 'Escape' && !el('about').hidden) showAbout(false);
+    else if ((event.key === 'Escape' || event.code === 'KeyP') && state === 'playing') (paused ? resume : pause)();
   });
   window.addEventListener('resize', resize);
 
   resize();
-  if (auto) start();
+  if (auto) start(params.get('mode') === 'explore' ? 'explore' : 'race');
   requestAnimationFrame(frame);
 })();

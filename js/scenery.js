@@ -24,6 +24,7 @@ const Scenery = (() => {
     basalt: ['#b8bcc4', '#9096a0', '#6e7480', '#525864', '#3c404a'],
   };
   const GRASS = ['#66b54c', '#5cab46', '#539f41', '#4a933b'];
+  const DIRT = ['#dcc391', '#cdae78', '#bd9a64', '#a6834f', '#8c6c3f'];
   const HEDGE = ['#3f9a3f', '#2f7d36', '#2a6e33', '#1f5226'];
   const OUTLINE = { leaf: '#143a1d', autumn: '#5a1d10', bark: '#2b1d16', birch: '#5d5648', stone: '#2b2b33', sand: '#3a2e20' };
   const CLOUD_SHADE = ['#0f1a3a10', '#0f1a3a20', '#0f1a3a30'];   // dark blue, fading in to about 19% strength
@@ -694,7 +695,7 @@ const Scenery = (() => {
 
   // ---- ground, pond, clouds ----
 
-  // The park floor, drawn once: mottled grass, scenery shadows and the hedge.
+  // The park floor, drawn once: mottled grass, the dirt paths, scenery shadows and the hedge.
   function buildGround(level) {
     const rand = seededRandom(7);
     const size = level.size;
@@ -711,8 +712,37 @@ const Scenery = (() => {
       }
     }
 
+    // The dirt paths: how far each pixel near one is from its line, worked out once.
+    const paths = level.paths || [];
+    const pathAway = new Float32Array(size * size).fill(Infinity);
+    for (const path of paths) {
+      const reach = path.half + 4;
+      for (const point of path.points) {
+        for (let y = Math.max(0, Math.floor(point.y - reach)); y <= Math.min(size - 1, Math.ceil(point.y + reach)); y++) {
+          for (let x = Math.max(0, Math.floor(point.x - reach)); x <= Math.min(size - 1, Math.ceil(point.x + reach)); x++) {
+            const d = Math.hypot(x + 0.5 - point.x, y + 0.5 - point.y);
+            if (d < pathAway[x + y * size]) pathAway[x + y * size] = d;
+          }
+        }
+      }
+    }
+    // Packed dirt, lighter where it is most walked, with pebbles; its edge
+    // wanders a little and grass breaks in along it.
+    const dirt = (x, y, across, inHedge) => {
+      const pebble = hash(x, y, 93);
+      if (pebble > 0.968) return pebble > 0.988 ? '#efe4c8' : '#85745c';
+      return tone(DIRT, 0.12 + across * across * 0.6 + (smoothNoise(x, y, 4, 94) - 0.5) * 0.4 + (inHedge ? 0.3 : 0), x, y);
+    };
+
     const c = pixelCanvas(size, size, (x, y) => {
-      if (x >= border && x < inner && y >= border && y < inner) {
+      const inside = x >= border && x < inner && y >= border && y < inner;
+      const fromPath = pathAway[x + y * size];
+      if (fromPath < Infinity) {
+        const half = paths[0].half + (smoothNoise(x, y, 6, 91) - 0.5) * 2.4;
+        if (fromPath < half && !(inside && fromPath > half - 1.6 && hash(x, y, 92) < 0.45)) return dirt(x, y, fromPath / half, !inside);
+        if (!inside && fromPath < half + 1.5) return OUTLINE.leaf;   // where the path cuts through the hedge
+      }
+      if (inside) {
         return tone(GRASS, (patches[(x >> 1) + (y >> 1) * cells] - 0.25) * 2, x, y, false);
       }
       const onEdge = ((x === border - 1 || x === inner) && y >= border - 1 && y <= inner)

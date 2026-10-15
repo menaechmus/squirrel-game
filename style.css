@@ -54,7 +54,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: clamp(6px, 2vmin, 12px);   /* closer together on a narrow phone, so the clock still fits */
   width: 100%;
   white-space: nowrap;
   text-shadow: 2px 2px 0 #000;
@@ -68,18 +68,21 @@ body {
   image-rendering: pixelated;
 }
 
-/* The sound button: a pixel speaker, with sound waves when on and a cross when off. */
-#mute {
+/* The sound button: a pixel speaker, with sound waves when on and a cross when
+   off; and the pause button beside the acorn count, in the same style. */
+#mute,
+#pause {
   pointer-events: auto;
   color: #fff;
   background: rgba(0, 0, 0, 0.45);
   border: 2px solid #fff;
-  padding: 4px 8px;
+  padding: 4px 5px;
   cursor: pointer;
 }
 
 #mute svg,
-#mute-menu svg {
+#mute-menu svg,
+#pause svg {
   display: block;
   width: 28px;
   height: 20px;
@@ -197,8 +200,43 @@ body {
   cursor: pointer;
 }
 
+/* The two ways to play, side by side, and the smaller buttons for everything else. */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 16px;
+  flex-shrink: 0;
+}
+
+.panel button.small {
+  font-size: 1em;
+  padding: clamp(4px, 1.2vh, 8px) 24px;
+  border-width: 3px;
+  box-shadow: 0 4px 0 #6a4322;
+  margin-top: 0;
+}
+
+/* How to play: plain reading, left-aligned, scrolling if it is longer than the screen. */
+#rules .text {
+  max-width: 36em;
+  text-align: left;
+}
+
+#rules h2 {
+  margin: 0.9em 0 0.3em;
+  font-size: 1.05em;
+  color: #f0c670;
+}
+
+#rules p {
+  margin: 0 0 0.5em;
+  color: #e4efe0;
+}
+
 /* Solid, so the screen it opens over doesn't show through. */
-#about {
+#about,
+#rules {
   background: #10221a;
 }
 

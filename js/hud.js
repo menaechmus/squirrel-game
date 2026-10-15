@@ -8,8 +8,8 @@ const Hud = (() => {
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-  // A miniature of the park: hedge, grass, the ponds and the stream with its
-  // bridges, the mountain at the east edge, and tree tops.
+  // A miniature of the park: hedge, grass, the paths, the ponds and the stream
+  // with its bridges, the mountain at the east edge, and tree tops.
   function buildMinimap(level) {
     const c = Sprites.canvas(MINIMAP_SIZE, MINIMAP_SIZE);
     const g = c.getContext('2d');
@@ -28,6 +28,8 @@ const Hud = (() => {
     const onBridge = (x, y) => streams.some(({ bridge }) => Math.abs(x - bridge.x) < cell / 2 && Math.abs(y - bridge.y) < cell / 2);
     const onMountain = (x, y) => foot && foot.shape(x - foot.x, y - foot.y) < 1;
     const inHedge = (x, y) => x < level.border || y < level.border || x > level.size - level.border || y > level.size - level.border;
+    const pathPoints = (level.paths || []).flatMap((path) => path.points.filter((point, i) => i % 4 === 0));
+    const onPath = (x, y) => pathPoints.some((point) => Math.abs(x - point.x) < cell / 2 && Math.abs(y - point.y) < cell / 2);
     for (let my = 0; my < MINIMAP_SIZE; my++) {
       for (let mx = 0; mx < MINIMAP_SIZE; mx++) {
         const x = (mx + 0.5) * cell;
@@ -39,6 +41,8 @@ const Hud = (() => {
           g.fillStyle = '#8f5a34';
         } else if (inWater(x, y)) {
           g.fillStyle = '#4a90d9';
+        } else if (onPath(x, y)) {
+          g.fillStyle = '#b89a68';
         } else if (inHedge(x, y)) {
           g.fillStyle = '#1f5226';
         } else {

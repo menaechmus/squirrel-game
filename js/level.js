@@ -11,12 +11,12 @@ const Level = (() => {
   const ACORNS_BY_BUSHES = 12;
   const TUFT_COUNT = 260;
 
-  // The south-east, added later from a seed of its own so that the rest of the
-  // park stayed where it was: a rocky mountain against the east hedge with a
-  // waterfall down its face, the stream it feeds, which runs into a second pond
-  // and on out through the south hedge, a log bridge over each stretch, and
-  // logs about the park.
-  const SOUTH_SEED = 20261014;
+  // ---- what stays where it is ----
+  // The first pond, in the north-west.
+  const FIRST_POND = { x: 404.16, y: 205.03, a: 66.82, b: 36.21 };
+  // The south-east: a rocky mountain against the east hedge with a waterfall
+  // down its face, the stream it feeds, which runs into a second pond and on
+  // out through the south hedge, and a log bridge over each stretch.
   const MOUNTAIN_MIDDLE = 640;   // how far down the east edge the middle of the mountain is
   const SMALL_POND = { x: 745, y: 835, a: 36, b: 22 };
   // The stream in two stretches, each smoothed into a curve: from the foot of
@@ -34,25 +34,51 @@ const Level = (() => {
   ];
   // Each stretch's log bridge: how far down the stretch, how long its logs, how much of the stream it spans.
   const BRIDGES = [{ along: 74, length: 26, gap: 28 }, { along: 37, length: 26, gap: 28 }];
+
+  // ---- the paths ----
+  // Two dirt paths, one north to south and one west to east, crossing where
+  // the squirrel starts: smooth curves through these points, from beyond one
+  // hedge to beyond the other. The first keeps clear of the pond.
+  const PATH_COURSES = [
+    [[470, -8], [474, 60], [490, 130], [506, 205], [500, 290], [487, 370], [480, 480], [469, 585], [453, 690], [461, 800], [478, 890], [474, 968]],
+    [[-8, 486], [70, 498], [160, 466], [260, 502], [370, 474], [480, 480], [590, 458], [700, 490], [800, 450], [880, 468], [968, 462]],
+  ];
+  const PATH_HALF = 6;   // half a path's width
+
+  // ---- trees ----
+  // Most trees stand in copses: clumps whose tops meet, each mostly of one
+  // kind. The rest stand alone or in twos and threes between them. (More trees
+  // than the 68 of the evenly spread park before 1.11, so the open ground
+  // between the copses is not left bare.)
+  const TREE_COUNT = 88;
+  const COPSES = { count: 6, trees: [8, 11], radius: [32, 42], spacing: 9, fromHedge: 70 };
+  const COPSE_KINDS = [
+    ['pine0', 'pine0', 'pine1', 'spruce0', 'spruce0'],    // a pine wood
+    ['birch0', 'birch1', 'birch0', 'birch1', 'elm1'],      // a birch stand
+    ['oak0', 'oak1', 'elm0', 'elm0', 'elm1'],              // oaks and elms
+    ['maple0', 'maple1', 'maple0', 'apple0', 'elm0'],      // maples
+    ['spruce0', 'pine1', 'pine0', 'birch0'],               // conifers with a birch or two
+    ['elm0', 'elm1', 'apple0', 'oak1', 'maple1'],          // mixed
+  ];
+  // `paired`: the share that stand near another lone tree, in twos and threes.
+  const LONE_TREES = { spacing: 20, paired: 0.4, sprites: ['oak0', 'oak1', 'elm0', 'elm1', 'birch0', 'birch1', 'maple0', 'maple1', 'apple0', 'pine0', 'pine1', 'spruce0', 'dead0'] };
+
+  // What else to scatter: how many, how much room each needs, which sprites to
+  // pick from (repeats make a sprite more common), and either the share that
+  // grow at the edge of a copse (`byCopses`) or that they keep to the open (`open`).
+  const SCENERY = [
+    { count: 18, spacing: 16, sprites: ['boulder0', 'boulder1', 'mossy0', 'cracked0', 'slab0', 'pile0', 'stone0'] },
+    { count: 8, spacing: 12, sprites: ['stump'], byCopses: 0.5 },
+    { count: 30, spacing: 12, sprites: ['bush0', 'bush1', 'bush2'], byCopses: 0.5 },
+    { count: 70, spacing: 5, sprites: ['flowerRed', 'flowerYellow', 'flowerPurple'], open: true },
+    { count: 14, spacing: 5, sprites: ['mushroom'], byCopses: 0.8 },
+  ];
   const LOG_COUNT = 10;
   const LOGS = ['logLong', 'logLong', 'logLongL', 'logShort', 'logShortL', 'logShortL'];
 
   // Finding the way: the park as a grid of cells a creature can or cannot stand in.
   const CELL = 8;
   const CLEARANCE = 5;        // a route keeps a creature's middle this far beyond anything solid
-
-  // What to scatter: how many, how much room each needs, and which sprites to
-  // pick from (repeats make a sprite more common).
-  const SCENERY = [
-    { count: 10, spacing: 26, sprites: ['oak0', 'oak1'] },
-    { count: 58, spacing: 20, sprites: ['elm0', 'elm0', 'elm1', 'elm1', 'birch0', 'birch1', 'maple0', 'maple0', 'maple1', 'maple1',
-      'apple0', 'pine0', 'pine0', 'pine1', 'pine1', 'spruce0', 'spruce0', 'dead0'] },
-    { count: 18, spacing: 16, sprites: ['boulder0', 'boulder1', 'mossy0', 'cracked0', 'slab0', 'pile0', 'stone0'] },
-    { count: 8, spacing: 12, sprites: ['stump'] },
-    { count: 30, spacing: 12, sprites: ['bush0', 'bush1', 'bush2'] },
-    { count: 70, spacing: 5, sprites: ['flowerRed', 'flowerYellow', 'flowerPurple'] },
-    { count: 14, spacing: 5, sprites: ['mushroom'] },
-  ];
 
   // Things you can't walk through: collision circle as [radius, height of its centre above the base].
   const SOLID = {
@@ -62,95 +88,35 @@ const Level = (() => {
     stump: [6, 4],
   };
 
+  // A smooth curve through a course: a point every pixel or so, each with its distance `s` along.
+  function smoothCourse(course) {
+    const points = [];
+    for (let i = 0; i < course.length - 1; i++) {
+      const [p0, p1, p2, p3] = [course[Math.max(0, i - 1)], course[i], course[i + 1], course[Math.min(course.length - 1, i + 2)]];
+      const steps = Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y));
+      for (let k = 0; k < steps; k++) {
+        const u = k / steps;
+        const spline = (a, b, c, d) => 0.5 * (2 * b + (c - a) * u + (2 * a - 5 * b + 4 * c - d) * u * u + (3 * b - a - 3 * c + d) * u * u * u);
+        points.push({ x: spline(p0.x, p1.x, p2.x, p3.x), y: spline(p0.y, p1.y, p2.y, p3.y) });
+      }
+    }
+    points.push({ x: course[course.length - 1].x, y: course[course.length - 1].y });
+    points[0].s = 0;
+    for (let i = 1; i < points.length; i++) points[i].s = points[i - 1].s + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    return points;
+  }
+
   function generate() {
     const rand = seededRandom(SEED);
     const range = (min, max) => min + rand() * (max - min);
+    const shuffled = (list) => list.map((item) => [rand(), item]).sort((a, b) => a[0] - b[0]).map((pair) => pair[1]);
     const spawn = { x: SIZE / 2, y: SIZE / 2 };
-
-    const pond = { x: 0, y: 0, a: range(60, 80), b: range(36, 48) };
-    do {
-      pond.x = range(200, SIZE - 200);
-      pond.y = range(200, SIZE - 200);
-    } while (Math.hypot(pond.x - spawn.x, pond.y - spawn.y) < 170);
-    const inPond = (x, y, pad) => ((x - pond.x) / (pond.a + pad)) ** 2 + ((y - pond.y) / (pond.b + pad)) ** 2 < 1;
-
-    // Occupied circles, so things don't overlap. The spawn stays clear.
-    const taken = [{ x: spawn.x, y: spawn.y, r: 36 }];
-    const isFree = (x, y, r) => !inPond(x, y, r + 8)
-      && taken.every((other) => Math.hypot(x - other.x, y - other.y) >= r + other.r);
     const inPark = (x, y, r) => x > BORDER + r && x < SIZE - BORDER - r
       && y > BORDER + r + 10 && y < SIZE - BORDER - r;
 
-    function freeSpot(r) {
-      for (let attempt = 0; attempt < 200; attempt++) {
-        const x = Math.round(range(BORDER + r + 4, SIZE - BORDER - r - 4));
-        const y = Math.round(range(BORDER + r + 14, SIZE - BORDER - r - 4));
-        if (isFree(x, y, r)) {
-          taken.push({ x, y, r });
-          return { x, y };
-        }
-      }
-      return null;
-    }
-
-    let props = [];
-    let solids = [];
-    for (const group of SCENERY) {
-      for (let i = 0; i < group.count; i++) {
-        const spot = freeSpot(group.spacing);
-        if (!spot) break;
-        const sprite = group.sprites[Math.floor(rand() * group.sprites.length)];
-        props.push({ sprite, x: spot.x, y: spot.y });
-        if (SOLID[sprite]) solids.push({ x: spot.x, y: spot.y - SOLID[sprite][1], r: SOLID[sprite][0], owner: props[props.length - 1] });
-      }
-    }
-
-    // An acorn is unfair if a tree further down the screen draws over it.
-    const trees = props.filter((prop) => Scenery.props[prop.sprite].hides);
-    const hiddenByTree = (x, y) => trees.some((tree) => {
-      const sprite = Scenery.props[tree.sprite].frames[0];
-      return Math.abs(x - tree.x) < sprite.width / 2 && y < tree.y && y > tree.y - sprite.height - 4;
-    });
-    let acorns = [];
-    // A tucked acorn sits right beside its tree or bush, inside that prop's own
-    // elbow room, so it is checked against trunks, rocks and other acorns instead.
-    const besideScenery = (x, y) => solids.every((solid) => Math.hypot(x - solid.x, y - solid.y) >= solid.r + 6)
-      && acorns.every((acorn) => Math.hypot(x - acorn.x, y - acorn.y) >= 30);
-    function tryAcorn(x, y, tucked) {
-      if (acorns.length >= ACORN_COUNT || !inPark(x, y, 6) || inPond(x, y, 13) || hiddenByTree(x, y)) return false;
-      if (tucked ? !besideScenery(x, y) : !isFree(x, y, 5)) return false;
-      taken.push({ x, y, r: 14 });
-      acorns.push({ x, y });
-      return true;
-    }
-
-    // Some acorns are tucked beside trunks or in front of bushes; the rest lie in the open.
-    const shuffled = (list, random = rand) => list.map((item) => [random(), item]).sort((a, b) => a[0] - b[0]).map((pair) => pair[1]);
-    let placed = 0;
-    for (const tree of shuffled(trees)) {
-      if (placed >= ACORNS_BY_TREES) break;
-      if (tryAcorn(tree.x + (rand() < 0.5 ? -12 : 12), tree.y + 3, true)) placed++;
-    }
-    placed = 0;
-    for (const bush of shuffled(props.filter((prop) => prop.sprite.startsWith('bush')))) {
-      if (placed >= ACORNS_BY_BUSHES) break;
-      if (tryAcorn(bush.x + (rand() < 0.5 ? -13 : 13), bush.y + 2, true)) placed++;
-    }
-    for (let attempt = 0; attempt < 3000 && acorns.length < ACORN_COUNT; attempt++) {
-      tryAcorn(Math.round(range(BORDER + 12, SIZE - BORDER - 12)), Math.round(range(BORDER + 24, SIZE - BORDER - 12)));
-    }
-
-    // Grass tufts go anywhere dry; they're only decoration.
-    for (let i = 0; i < TUFT_COUNT; i++) {
-      const x = Math.round(range(BORDER + 6, SIZE - BORDER - 6));
-      const y = Math.round(range(BORDER + 10, SIZE - BORDER - 4));
-      if (!inPond(x, y, 6)) props.push({ sprite: 'tuft', x, y });
-    }
-
-    // ---- the south-east: the mountain, its stream, the second pond, the bridges, and logs ----
-    // Everything up to here is exactly as it was before these were added.
-    const southRandom = seededRandom(SOUTH_SEED);
-    const smallPond = { x: SMALL_POND.x, y: SMALL_POND.y, a: SMALL_POND.a, b: SMALL_POND.b };
+    // ---- what stays where it is: the ponds, the mountain and its stream ----
+    const pond = { ...FIRST_POND };
+    const smallPond = { ...SMALL_POND };
     const ponds = [pond, smallPond];
     const inAnyPond = (x, y, pad) => ponds.some((each) => ((x - each.x) / (each.a + pad)) ** 2 + ((y - each.y) / (each.b + pad)) ** 2 < 1);
 
@@ -163,30 +129,21 @@ const Level = (() => {
     const onMountain = (x, y, pad) => foot.shape(x - foot.x, y - foot.y, pad) < 1;
     const falls = { x: mountain.x + mountainArt.falls.dx, y: mountain.y + mountainArt.falls.dy };
 
-    // The stream, stretch by stretch: a smooth curve through its course, a
-    // point every pixel or so, each with its distance `s` downstream and how
-    // wide the water is either side of it.
+    // The stream, stretch by stretch: each point with how wide the water is either side of it.
     const streams = STREAM_COURSES.map((list, index) => {
-      const course = (index === 0 ? [falls] : []).concat(list.map(([x, y]) => ({ x, y })));
-      const points = [];
-      for (let i = 0; i < course.length - 1; i++) {
-        const [p0, p1, p2, p3] = [course[Math.max(0, i - 1)], course[i], course[i + 1], course[Math.min(course.length - 1, i + 2)]];
-        const steps = Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y));
-        for (let k = 0; k < steps; k++) {
-          const u = k / steps;
-          const spline = (a, b, c, d) => 0.5 * (2 * b + (c - a) * u + (2 * a - 5 * b + 4 * c - d) * u * u + (3 * b - a - 3 * c + d) * u * u * u);
-          points.push({ x: spline(p0.x, p1.x, p2.x, p3.x), y: spline(p0.y, p1.y, p2.y, p3.y) });
-        }
-      }
-      points.push({ x: course[course.length - 1].x, y: course[course.length - 1].y });
-      points[0].s = 0;
-      for (let i = 1; i < points.length; i++) points[i].s = points[i - 1].s + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+      const points = smoothCourse((index === 0 ? [falls] : []).concat(list.map(([x, y]) => ({ x, y }))));
       for (const point of points) point.half = STREAM_HALF[index](point.s);
       const at = points.find((point) => point.s >= BRIDGES[index].along);
       return { points, bridge: { x: at.x, y: at.y, s: at.s, length: BRIDGES[index].length, gap: BRIDGES[index].gap } };
     });
     const streamPoints = streams.flatMap((stretch) => stretch.points);
-    const nearStream = (x, y, pad) => streamPoints.some((point) => Math.hypot(x - point.x, y - point.y) < point.half + pad);
+    // Most of the park is nowhere near the stream: a box round it saves looking at every point.
+    const streamBox = {
+      left: Math.min(...streamPoints.map((point) => point.x)) - 16, right: Math.max(...streamPoints.map((point) => point.x)) + 16,
+      top: Math.min(...streamPoints.map((point) => point.y)) - 16, bottom: Math.max(...streamPoints.map((point) => point.y)) + 16,
+    };
+    const nearStream = (x, y, pad) => x > streamBox.left - pad && x < streamBox.right + pad && y > streamBox.top - pad && y < streamBox.bottom + pad
+      && streamPoints.some((point) => Math.hypot(x - point.x, y - point.y) < point.half + pad);
 
     // Water that cannot be walked through: each stretch as a chain of short
     // strips, each `reach` wide either side of its line, broken under its bridge.
@@ -214,36 +171,139 @@ const Level = (() => {
       const near = closestOn(strip, x, y);
       return Math.hypot(x - near.x, y - near.y) < strip.reach + radius;
     });
+    // Water and the mountain: nothing grows or stands in or on them.
+    const inFeature = (x, y, pad) => inAnyPond(x, y, pad) || onMountain(x, y, pad) || nearStream(x, y, pad);
 
-    // In front of the waterfall nothing should stand between it and the player.
-    const beforeFalls = (x, y, half) => Math.abs(x - falls.x) < half && y >= mountain.y && y < mountain.y + 28;
-    const inSmallPond = (x, y, pad) => ((x - smallPond.x) / (smallPond.a + pad)) ** 2 + ((y - smallPond.y) / (smallPond.b + pad)) ** 2 < 1;
-    const southFeature = (x, y, pad) => onMountain(x, y, pad) || nearStream(x, y, pad) || inSmallPond(x, y, pad);
-
-    // Clear the ground for them: whatever stood there goes, and a tuft whose blades would reach the water.
-    const reach = (prop) => (SOLID[prop.sprite] ? SOLID[prop.sprite][0] + 6 : prop.sprite === 'tuft' ? 5 : 6);
-    const removed = new Set(props.filter((prop) => southFeature(prop.x, prop.y, reach(prop))
-      || (Scenery.props[prop.sprite].hides && beforeFalls(prop.x, prop.y, Scenery.props[prop.sprite].frames[0].width / 2 + 4))));
-    props = props.filter((prop) => !removed.has(prop));
-    solids = solids.filter((solid) => !removed.has(solid.owner));
-    props.push({ sprite: 'mountain', x: mountain.x, y: mountain.y });
-    for (const point of streamPoints.filter((each, index) => index % 6 === 0)) taken.push({ x: point.x, y: point.y, r: point.half + 10 });
-    taken.push({ x: smallPond.x, y: smallPond.y, r: smallPond.a + 12 });
-
-    // Logs about the park, each solid along its length.
-    const logs = [];
-    for (let attempt = 0; attempt < 400 && logs.length < LOG_COUNT; attempt++) {
-      const x = Math.round(BORDER + 30 + southRandom() * (SIZE - 2 * BORDER - 60));
-      const y = Math.round(BORDER + 40 + southRandom() * (SIZE - 2 * BORDER - 60));
-      const sprite = LOGS[Math.floor(southRandom() * LOGS.length)];
-      if (!taken.every((other) => Math.hypot(x - other.x, y - other.y) >= 18 + other.r) || inAnyPond(x, y, 26) || onMountain(x, y, 22)) continue;
-      taken.push({ x, y, r: 18 });
-      props.push({ sprite, x, y });
-      const half = Scenery.props[sprite].frames[0].width / 2 - 5;
-      for (let along = -half; along <= half + 0.01; along += (2 * half) / Math.ceil((2 * half) / 7)) solids.push({ x: x + along, y: y - 5, r: 5 });
-      logs.push({ x, y });
+    // ---- the paths ----
+    const paths = PATH_COURSES.map((list) => ({ points: smoothCourse(list.map(([x, y]) => ({ x, y }))), half: PATH_HALF }));
+    // How far each 4-pixel cell of the park is from the nearer path's line,
+    // worked out once, up to 72 px (as far as anything needs to look).
+    const FIELD = 4;
+    const REACH = 72;
+    const fieldCols = SIZE / FIELD;
+    const pathAway = new Float32Array(fieldCols * fieldCols).fill(REACH);
+    for (const { points } of paths) {
+      for (let i = 0; i < points.length; i += 3) {
+        const point = points[i];
+        for (let row = Math.max(0, Math.floor((point.y - REACH) / FIELD)); row <= Math.min(fieldCols - 1, Math.floor((point.y + REACH) / FIELD)); row++) {
+          for (let col = Math.max(0, Math.floor((point.x - REACH) / FIELD)); col <= Math.min(fieldCols - 1, Math.floor((point.x + REACH) / FIELD)); col++) {
+            const away = Math.hypot((col + 0.5) * FIELD - point.x, (row + 0.5) * FIELD - point.y);
+            if (away < pathAway[col + row * fieldCols]) pathAway[col + row * fieldCols] = away;
+          }
+        }
+      }
     }
-    props.sort((a, b) => a.y - b.y);
+    const fromPath = (x, y) => pathAway[Math.min(fieldCols - 1, Math.max(0, Math.floor(x / FIELD))) + Math.min(fieldCols - 1, Math.max(0, Math.floor(y / FIELD))) * fieldCols];
+    const onPath = (x, y, pad) => fromPath(x, y) < PATH_HALF + pad;
+
+    // Occupied circles, so things don't overlap. The spawn stays clear, and so
+    // does the ground in front of the waterfall, so nothing hides it.
+    const taken = [{ x: spawn.x, y: spawn.y, r: 36 }, { x: falls.x, y: mountain.y + 16, r: 22 }];
+    const isFree = (x, y, r) => inPark(x, y, r) && !inFeature(x, y, r + 8) && !onPath(x, y, r + 2)
+      && taken.every((other) => Math.hypot(x - other.x, y - other.y) >= r + other.r);
+    const anywhere = (r) => ({ x: Math.round(range(BORDER + r + 4, SIZE - BORDER - r - 4)), y: Math.round(range(BORDER + r + 14, SIZE - BORDER - r - 4)) });
+
+    const props = [{ sprite: 'mountain', x: mountain.x, y: mountain.y }];
+    const solids = [];
+    function place(sprite, x, y, r) {
+      taken.push({ x, y, r });
+      const prop = { sprite, x, y };
+      props.push(prop);
+      if (SOLID[sprite]) solids.push({ x, y: y - SOLID[sprite][1], r: SOLID[sprite][0], owner: prop });
+      return prop;
+    }
+
+    // ---- copses, then lone trees ----
+    // Each copse goes where it is furthest from the others (the best of a few
+    // tries), so they spread across the park; clear of the hedge, the water,
+    // the mountain, the paths and the start.
+    const copses = [];
+    while (copses.length < COPSES.count) {
+      let best = null;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const radius = range(COPSES.radius[0], COPSES.radius[1]);
+        const x = range(BORDER + COPSES.fromHedge, SIZE - BORDER - COPSES.fromHedge);
+        const y = range(BORDER + COPSES.fromHedge, SIZE - BORDER - COPSES.fromHedge);
+        if (inFeature(x, y, radius + 30) || onPath(x, y, radius + 14) || Math.hypot(x - spawn.x, y - spawn.y) < radius + 90) continue;
+        const room = Math.min(Infinity, ...copses.map((other) => Math.hypot(x - other.x, y - other.y)));
+        if (!best || room > best.room) best = { x, y, radius, room };
+      }
+      if (!best) break;
+      copses.push({ x: best.x, y: best.y, radius: best.radius, trees: [] });
+    }
+    // A copse is seen from above at a slant, so a little flatter than round.
+    const SLANT = 0.8;
+    const inACopse = (x, y, pad) => copses.some((copse) => Math.hypot(x - copse.x, (y - copse.y) / SLANT) < copse.radius + pad);
+    shuffled(COPSE_KINDS).slice(0, copses.length).forEach((kind, index) => {
+      const copse = copses[index];
+      const count = COPSES.trees[0] + Math.floor(rand() * (COPSES.trees[1] - COPSES.trees[0] + 1));
+      for (let attempt = 0; attempt < 120 && copse.trees.length < count; attempt++) {
+        const angle = rand() * Math.PI * 2;
+        const reach = copse.radius * Math.sqrt(rand());
+        const x = Math.round(copse.x + Math.cos(angle) * reach);
+        const y = Math.round(copse.y + Math.sin(angle) * reach * SLANT);
+        if (isFree(x, y, COPSES.spacing)) copse.trees.push(place(kind[Math.floor(rand() * kind.length)], x, y, COPSES.spacing));
+      }
+    });
+    const lone = [];
+    for (let attempt = 0; attempt < 4000 && props.length - 1 < TREE_COUNT; attempt++) {
+      // Some stand near another lone tree, in twos and threes; the rest anywhere.
+      let spot = anywhere(LONE_TREES.spacing);
+      if (lone.length && rand() < LONE_TREES.paired) {
+        const other = lone[Math.floor(rand() * lone.length)];
+        const angle = rand() * Math.PI * 2;
+        const reach = 2 * LONE_TREES.spacing + rand() * 12;
+        spot = { x: Math.round(other.x + Math.cos(angle) * reach), y: Math.round(other.y + Math.sin(angle) * reach * SLANT) };
+      }
+      if (!isFree(spot.x, spot.y, LONE_TREES.spacing)) continue;
+      lone.push(place(LONE_TREES.sprites[Math.floor(rand() * LONE_TREES.sprites.length)], spot.x, spot.y, LONE_TREES.spacing));
+    }
+
+    // ---- rocks, stumps, bushes, flowers and mushrooms ----
+    // Just outside a copse's edge, for what grows at the edge of a wood.
+    const byACopse = () => {
+      const copse = copses[Math.floor(rand() * copses.length)];
+      const angle = rand() * Math.PI * 2;
+      const reach = copse.radius + 6 + rand() * 22;
+      return { x: Math.round(copse.x + Math.cos(angle) * reach), y: Math.round(copse.y + Math.sin(angle) * reach * SLANT) };
+    };
+    for (const group of SCENERY) {
+      for (let i = 0; i < group.count; i++) {
+        const edge = copses.length && group.byCopses && rand() < group.byCopses;
+        for (let attempt = 0; attempt < 200; attempt++) {
+          const spot = edge ? byACopse() : anywhere(group.spacing);
+          if ((group.open && inACopse(spot.x, spot.y, 10)) || !isFree(spot.x, spot.y, group.spacing)) continue;
+          place(group.sprites[Math.floor(rand() * group.sprites.length)], spot.x, spot.y, group.spacing);
+          break;
+        }
+      }
+    }
+
+    // ---- logs, by the copses and beside the paths, each solid along its length ----
+    const besideAPath = () => {
+      const { points } = paths[Math.floor(rand() * paths.length)];
+      const at = points[Math.floor(rand() * points.length)];
+      const side = rand() < 0.5 ? -1 : 1;
+      return { x: Math.round(at.x + side * (PATH_HALF + 16 + rand() * 14)), y: Math.round(at.y + side * (rand() - 0.5) * 20) };
+    };
+    const logs = [];
+    for (let attempt = 0; attempt < 800 && logs.length < LOG_COUNT; attempt++) {
+      const spot = copses.length && rand() < 0.6 ? byACopse() : besideAPath();
+      const sprite = LOGS[Math.floor(rand() * LOGS.length)];
+      if (!isFree(spot.x, spot.y, 18)) continue;
+      taken.push({ x: spot.x, y: spot.y, r: 18 });
+      props.push({ sprite, x: spot.x, y: spot.y });
+      const half = Scenery.props[sprite].frames[0].width / 2 - 5;
+      for (let along = -half; along <= half + 0.01; along += (2 * half) / Math.ceil((2 * half) / 7)) solids.push({ x: spot.x + along, y: spot.y - 5, r: 5 });
+      logs.push({ x: spot.x, y: spot.y });
+    }
+
+    // An acorn is unfair if a tree further down the screen draws over it.
+    const trees = props.filter((prop) => Scenery.props[prop.sprite].hides && Scenery.props[prop.sprite].tops);
+    const hiddenByTree = (x, y) => trees.some((tree) => {
+      const sprite = Scenery.props[tree.sprite].frames[0];
+      return Math.abs(x - tree.x) < sprite.width / 2 && y < tree.y && y > tree.y - sprite.height - 4;
+    });
 
     // Nudge a creature of the given radius out of anything solid and keep it
     // inside the hedge. Water always stops it; with `scenery` false, nothing else does.
@@ -519,7 +579,7 @@ const Level = (() => {
       return cell < 0 ? Infinity : field.dist[cell] * CELL;
     }
 
-    // ---- acorns that stood where the new features are go somewhere else ----
+    // ---- acorns ----
     const reachable = distancesFrom(spawn);
     const canReach = (x, y) => {
       for (const [dx, dy] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]]) {
@@ -528,36 +588,66 @@ const Level = (() => {
       }
       return false;
     };
-    const bushes = props.filter((prop) => prop.sprite.startsWith('bush'));
-    const wasTucked = (acorn, list) => list.some((prop) => Math.hypot(prop.x - acorn.x, prop.y - acorn.y) < 15);
-    const moved = acorns.filter((acorn) => southFeature(acorn.x, acorn.y, 13) || blocked(acorn.x, acorn.y, 3) || !canReach(acorn.x, acorn.y));
-    const kinds = moved.map((acorn) => (wasTucked(acorn, trees) ? 'tree' : wasTucked(acorn, bushes) ? 'bush' : 'open'));
-    acorns = acorns.filter((acorn) => !moved.includes(acorn));
-    const fits = (x, y) => !southFeature(x, y, 13) && !blocked(x, y, 6) && canReach(x, y);
-    const standing = new Set(props);
-    for (const kind of kinds) {
-      let done = false;
-      if (kind !== 'open') {
-        const beside = kind === 'tree' ? trees : bushes;
-        const offset = kind === 'tree' ? [12, 3] : [13, 2];
-        for (const prop of shuffled(beside.filter((each) => standing.has(each)), southRandom)) {
-          const x = prop.x + (southRandom() < 0.5 ? -offset[0] : offset[0]);
-          const y = prop.y + offset[1];
-          if (fits(x, y) && tryAcorn(x, y, true)) { done = true; break; }
-        }
-      }
-      for (let attempt = 0; !done && attempt < 3000; attempt++) {
-        const x = Math.round(BORDER + 12 + southRandom() * (SIZE - 2 * BORDER - 24));
-        const y = Math.round(BORDER + 24 + southRandom() * (SIZE - 2 * BORDER - 36));
-        if (fits(x, y) && tryAcorn(x, y)) done = true;
-      }
+    // The rules every acorn keeps, here and when Explore grows a new one: in
+    // the park, clear of water, the mountain and anything solid, not under a
+    // tree top, and somewhere the squirrel can get to.
+    const acornFits = (x, y) => inPark(x, y, 6) && !inFeature(x, y, 13) && !hiddenByTree(x, y) && !blocked(x, y, 6) && canReach(x, y);
+    const acorns = [];
+    // A tucked acorn sits right beside its tree or bush, inside that prop's own
+    // elbow room, so it is checked against trunks, rocks and other acorns instead.
+    const besideScenery = (x, y) => solids.every((solid) => Math.hypot(x - solid.x, y - solid.y) >= solid.r + 6)
+      && acorns.every((acorn) => Math.hypot(x - acorn.x, y - acorn.y) >= 30);
+    function tryAcorn(x, y, tucked) {
+      if (acorns.length >= ACORN_COUNT || !acornFits(x, y)) return false;
+      if (tucked ? !besideScenery(x, y) : !taken.every((other) => Math.hypot(x - other.x, y - other.y) >= 5 + other.r)) return false;
+      taken.push({ x, y, r: 15 });   // so acorns in the open are at least 20 px apart
+      acorns.push({ x, y });
+      return true;
+    }
+    // Some acorns are tucked beside trunks or in front of bushes; the rest lie in the open.
+    let placed = 0;
+    for (const tree of shuffled(trees)) {
+      if (placed >= ACORNS_BY_TREES) break;
+      if (tryAcorn(tree.x + (rand() < 0.5 ? -12 : 12), tree.y + 3, true)) placed++;
+    }
+    placed = 0;
+    for (const bush of shuffled(props.filter((prop) => prop.sprite.startsWith('bush')))) {
+      if (placed >= ACORNS_BY_BUSHES) break;
+      if (tryAcorn(bush.x + (rand() < 0.5 ? -13 : 13), bush.y + 2, true)) placed++;
+    }
+    for (let attempt = 0; attempt < 3000 && acorns.length < ACORN_COUNT; attempt++) {
+      tryAcorn(Math.round(range(BORDER + 12, SIZE - BORDER - 12)), Math.round(range(BORDER + 24, SIZE - BORDER - 12)));
     }
 
+    // A spot for a new acorn, as Explore grows one for each taken: one that
+    // keeps the acorn rules, at least 20 px from the acorns lying about, and
+    // `margin` px outside `view` (the part of the park on screen), so it never
+    // appears in front of the player. Null if none turned up.
+    function newAcornSpot(random, lying, view, margin = 24) {
+      for (let attempt = 0; attempt < 300; attempt++) {
+        const x = Math.round(BORDER + 12 + random() * (SIZE - 2 * BORDER - 24));
+        const y = Math.round(BORDER + 24 + random() * (SIZE - 2 * BORDER - 36));
+        if (x > view.x - margin && x < view.x + view.w + margin && y > view.y - margin && y < view.y + view.h + margin) continue;
+        if (lying.some((acorn) => Math.hypot(acorn.x - x, acorn.y - y) < 20)) continue;
+        if (acornFits(x, y)) return { x, y };
+      }
+      return null;
+    }
+
+    // Grass tufts go anywhere dry, creeping in at the edges of the paths; they're only decoration.
+    for (let i = 0; i < TUFT_COUNT; i++) {
+      const x = Math.round(range(BORDER + 6, SIZE - BORDER - 6));
+      const y = Math.round(range(BORDER + 10, SIZE - BORDER - 4));
+      if (!inFeature(x, y, 5) && !onPath(x, y, -2)) props.push({ sprite: 'tuft', x, y });
+    }
+    props.sort((a, b) => a.y - b.y);
+
     return {
-      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, falls, logs, props, acorns, pushOut, blocked, nearestWater,
-      wayTo, nearestByWay, clearLine, distancesFrom, distanceTo,
-      // For tests: the route grid, and which acorns had to move for the new features.
-      grid: { cell: CELL, cols: COLS, open, isOpen: (x, y) => open[cellOf(x, y)] === 1 }, movedAcorns: moved.length,
+      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, falls, paths, logs, props, acorns,
+      pushOut, blocked, nearestWater, acornFits, newAcornSpot, wayTo, nearestByWay, clearLine, distancesFrom, distanceTo,
+      // For tests: the copses, and the route grid.
+      copses: copses.map((copse) => ({ x: copse.x, y: copse.y, radius: copse.radius, trees: copse.trees.length })),
+      grid: { cell: CELL, cols: COLS, open, isOpen: (x, y) => open[cellOf(x, y)] === 1 },
     };
   }
 
