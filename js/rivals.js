@@ -60,13 +60,15 @@ const Rivals = (() => {
       // Jays that come down to sit for a while, on open grass or a tree top.
       perch: {
         first: 6,
-        gap: [16, 30],              // rest between new arrivals
-        atOnce: 2,                  // jays sitting at the same time
-        stay: [4, 9],               // seconds each one sits
+        gap: [8, 15],               // rest between new arrivals
+        atOnce: 4,                  // jays sitting at the same time
+        stay: [4, 9],               // seconds one sits on the grass...
+        stayOnTree: [8, 18],        // ...and up a tree
         turn: [1.2, 3.5],           // seconds between hops round to face the other way
         onTree: 0.5,                // how often it picks a tree top, when one is in view
         lead: 1.2,                  // how many seconds ahead of the player to aim...
-        farEnd: 0.35,               // ...and how much of that view to use, at its far end, when they are on the move
+        farEnd: 0.35,               // ...and how much of that view to use, at its far end, when they are on the move...
+        treeFarEnd: 0.7,            // ...or when it looks for a tree top, which is harder to find
         speed: [95, 125],
         height: 40,                 // how far above its perch it flies in and out
         glide: 70,                  // it starts coming down this far from the perch
@@ -699,14 +701,14 @@ const Rivals = (() => {
     const atEdge = (feet, rect) => feet.x < rect.x + PERCH_EDGE.side || feet.x > rect.x + rect.w - PERCH_EDGE.side
       || feet.y < rect.y + PERCH_EDGE.top || feet.y > rect.y + rect.h - PERCH_EDGE.bottom;
 
-    // Somewhere for a jay to sit in `zone`, a part of `soon`: a tree top, or open grass.
-    function perchSpot(zone, soon) {
+    // Somewhere for a jay to sit, in parts of `soon`: a tree top in `treeZone`, or open grass in `zone`.
+    function perchSpot(zone, treeZone, soon) {
       const tuning = TUNING.extras.perch;
-      const inZone = (feet) => feet.x > zone.x && feet.x < zone.x + zone.w && feet.y > zone.y && feet.y < zone.y + zone.h;
+      const inTreeZone = (feet) => feet.x > treeZone.x && feet.x < treeZone.x + treeZone.w && feet.y > treeZone.y && feet.y < treeZone.y + treeZone.h;
       if (extraRandom() < tuning.onTree) {
         const free = treeTops.filter((top) => {
           const feet = { x: top.x, y: top.y - top.z };
-          return inZone(feet) && !world.acorns().some((acorn) => near(acorn, feet, tuning.clearOfAcorns))
+          return inTreeZone(feet) && !world.acorns().some((acorn) => near(acorn, feet, tuning.clearOfAcorns))
             && !perchers.some((bird) => bird.spot === top);
         });
         if (free.length) return free[Math.floor(extraRandom() * free.length)];
@@ -720,27 +722,31 @@ const Rivals = (() => {
 
     // A jay sets off for somewhere to sit. With the player standing still that
     // is anywhere well inside the view, and it flies in from the nearer side.
-    // With the player on the move it is the far end of what is coming into view,
-    // and it flies in from ahead: they see it land, and walk towards it.
+    // With the player on the move it is the far end of what is coming into view
+    // (more of it for a tree top), and it flies in from ahead: they see it land,
+    // and walk towards it.
     function landJay(view) {
       const tuning = TUNING.extras.perch;
       const soon = comingView(view, tuning.lead);
-      const zone = {
-        x: soon.x + PERCH_EDGE.side + 6, y: soon.y + PERCH_EDGE.top + 6,
-        w: soon.w - 2 * PERCH_EDGE.side - 12, h: soon.h - PERCH_EDGE.top - PERCH_EDGE.bottom - 12,
-      };
       const across = Math.abs(drift.x) > 15;
-      if (across) {
-        const far = zone.w * tuning.farEnd;
-        if (drift.x > 0) zone.x += zone.w - far;
-        zone.w = far;
-      }
-      if (Math.abs(drift.y) > 15) {
-        const far = zone.h * tuning.farEnd;
-        if (drift.y > 0) zone.y += zone.h - far;
-        zone.h = far;
-      }
-      const spot = perchSpot(zone, soon);
+      const zoneFor = (share) => {
+        const zone = {
+          x: soon.x + PERCH_EDGE.side + 6, y: soon.y + PERCH_EDGE.top + 6,
+          w: soon.w - 2 * PERCH_EDGE.side - 12, h: soon.h - PERCH_EDGE.top - PERCH_EDGE.bottom - 12,
+        };
+        if (across) {
+          const far = zone.w * share;
+          if (drift.x > 0) zone.x += zone.w - far;
+          zone.w = far;
+        }
+        if (Math.abs(drift.y) > 15) {
+          const far = zone.h * share;
+          if (drift.y > 0) zone.y += zone.h - far;
+          zone.h = far;
+        }
+        return zone;
+      };
+      const spot = perchSpot(zoneFor(tuning.farEnd), zoneFor(tuning.treeFarEnd), soon);
       if (!spot) return;
       const seat = seatOf(spot);
       const nearerSide = (seat.x - soon.x < soon.w / 2) === (extraRandom() < 0.75);
@@ -810,7 +816,7 @@ const Rivals = (() => {
           bird.z = seat.z + 5 + tuning.height * left;
           if (moveTowards(bird, seat.x, seat.y, bird.speed * (0.5 + 0.5 * left) * dt)) {
             bird.state = 'sit';
-            bird.timer = pick(tuning.stay);
+            bird.timer = pick(bird.spot.tree ? tuning.stayOnTree : tuning.stay);
             bird.turn = pick(tuning.turn);
           }
         } else {
