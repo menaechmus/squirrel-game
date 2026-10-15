@@ -8,6 +8,7 @@
   const HINT_ARROWS = 3;     // arrows point to this many of the nearest acorns out of sight
   const ARROW_BLINK = [0.5, 0.2];   // seconds shown, seconds hidden
   const TURN_BEFORE_SNIFF = 0.3;    // the squirrel turns towards an acorn this long before each round of sniffs
+  const JOY_HEIGHT = 4;             // pixels it jumps for joy on getting an acorn
   const MINIMAP_SHARE = 0.18;       // minimap width as a share of the screen's shorter side
   const BEST_KEY = 'squirrel-game-best-haul';
   const RIVAL_NAMES = { jays: 'Blue jays', groundhogs: 'Groundhogs', squirrels: 'Grey squirrels' };
@@ -44,7 +45,7 @@
     : null;
   const random = seededRandom(params.has('seed') ? Number(params.get('seed')) : auto ? 1 : Date.now());
 
-  const player = { x: level.spawn.x, y: level.spawn.y, facing: 'down', moving: false, hop: 0, idle: 0, sniffRound: -1 };
+  const player = { x: level.spawn.x, y: level.spawn.y, facing: 'down', moving: false, hop: 0, idle: 0, sniffRound: -1, joy: 0 };
   const counts = { you: 0, jays: 0, groundhogs: 0, squirrels: 0 };
   let state = 'menu';   // 'menu' | 'playing' | 'over'
   let acorns = [];
@@ -161,6 +162,7 @@
     player.facing = 'down';
     player.idle = 0;
     player.sniffRound = -1;
+    player.joy = 0;
     acorns = level.acorns.map((acorn, index) => ({ x: acorn.x, y: acorn.y, phase: index, claimedBy: null, gone: false }));
     for (const who of Object.keys(counts)) counts[who] = 0;
     particles = [];
@@ -200,6 +202,7 @@
     acorns = acorns.filter((other) => other !== acorn);
     counts[who]++;
     if (who === 'you') {
+      player.joy = Sprites.cheer(player.joy);   // two jumps for joy, only for show
       burst(acorn, '#f0c670', 40);
       sound('pickup');
     } else {
@@ -309,6 +312,8 @@
       particle.life -= dt;
     }
     particles = particles.filter((particle) => particle.life > 0);
+    // A jump for joy plays out even when that acorn was the last and the round is over.
+    player.joy = Math.max(0, player.joy - dt);
     if (state !== 'playing') {
       player.moving = false;
       player.idle += dt;
@@ -404,7 +409,9 @@
       things.push({ sprite: thing.sprite, x: thing.x - camX, y: thing.y - camY, depth: thing.depth, clip: thing.clip });
     }
     const poses = Sprites.squirrel[player.facing];
-    const hop = player.moving ? [0, 1, 2, 1][Math.floor(player.hop * 12) % 4] : 0;
+    // Only the picture leaves the ground: the camera and the shadow stay with the squirrel itself.
+    const hop = player.joy > 0 ? Sprites.joyLift(player.joy, JOY_HEIGHT)
+      : player.moving ? [0, 1, 2, 1][Math.floor(player.hop * 12) % 4] : 0;
     const squirrel = {
       sprite: player.moving ? poses.rest : Sprites.idleFrame(poses, player.idle),
       x: px - 8, y: py - 15 - hop, depth: player.y,

@@ -195,6 +195,24 @@ const Sprites = (() => {
     return poses.rest;
   }
 
+  // An animal that gets an acorn jumps for joy, twice. Its `joy` counts down
+  // the seconds of jumping it has left.
+  const JOY_JUMP = 0.24;   // seconds one jump takes
+
+  // The jumping to start, or to carry on with: another acorn in mid-jump
+  // finishes that jump and adds two more, so the animal never drops out of the air.
+  function cheer(joy) {
+    return 2 * JOY_JUMP + (joy > 0 ? joy % JOY_JUMP : 0);
+  }
+
+  // How far off the ground to draw an animal with `joy` seconds of jumping
+  // left, at most `height` pixels: an arc for each jump.
+  function joyLift(joy, height) {
+    if (joy <= 0) return 0;
+    const part = (joy % JOY_JUMP) / JOY_JUMP;
+    return Math.round(height * 4 * part * (1 - part));
+  }
+
   const acorn = fromText([
     '...kk...',
     '...kb...',
@@ -401,6 +419,8 @@ const Sprites = (() => {
     squirrel: squirrel(),
     greySquirrel: squirrel({ o: '#a3a3ae', O: '#6f6f7c', c: '#eeeef2' }),
     idleFrame,
+    cheer,
+    joyLift,
     acorn,
     jay: { right: jayRight, left: jayRight.map(mirrored) },
     jaySitting: sittingJay(),

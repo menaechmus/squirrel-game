@@ -103,6 +103,7 @@ const Rivals = (() => {
   const HOLE_LIFE = 20;
   const HOLE_FILLING = 1.5;   // for its last moments a hole shows as a heap of loose dirt
   const PEEK = 0.6;           // how far out a peeking groundhog comes: ears, eyes and nose
+  const JOY_HEIGHT = { squirrel: 4, groundhog: 3 };   // pixels each jumps for joy on getting an acorn
   const MAX_DRIFT = 120;      // ignore the player "moving" faster than this (a restart, not a run)
   // A sitting jay this close to the edge of the view (sides, top, bottom) is about to be left behind.
   const PERCH_EDGE = { side: 28, top: 34, bottom: 16 };
@@ -221,7 +222,7 @@ const Rivals = (() => {
       // The groundhog is at (x, y); `home` is its hole, which it only leaves to fetch an acorn.
       hog = {
         state: 'hidden', timer: TUNING.groundhog.firstVisit, x: 0, y: 0, home: { x: 0, y: 0 }, rise: 0,
-        facing: 'right', step: 0, looked: 0, tries: 0, hurried: false, carrying: false, target: null,
+        facing: 'right', step: 0, looked: 0, tries: 0, joy: 0, hurried: false, carrying: false, target: null,
       };
       // Grey squirrels start in opposite corners, well away from the player.
       const inset = level.border + 50;
@@ -234,7 +235,7 @@ const Rivals = (() => {
           idle: i * 1.3,   // staggered, so they don't sniff in step
           state: 'rest', timer: TUNING.squirrel.firstRest + i * 3, target: null,
           best: Infinity, stalled: 0, detour: 0, detourX: 0, detourY: 0, failures: 0,
-          strollTo: null, strollTime: 0, pause: 1 + i,
+          strollTo: null, strollTime: 0, pause: 1 + i, joy: 0,
         };
         level.pushOut(squirrel, 4);
         squirrels.push(squirrel);
@@ -382,6 +383,7 @@ const Rivals = (() => {
 
     function updateHog(dt) {
       const tuning = TUNING.groundhog;
+      hog.joy = Math.max(0, hog.joy - dt);
       const playerClose = () => near(player, hog.target, tuning.scare) || near(player, hog, tuning.scare);
       if (hog.state === 'hidden') {
         hog.timer -= dt;
@@ -465,7 +467,9 @@ const Rivals = (() => {
           hog.carrying = true;
           release(hog);
           hog.state = 'back';
-          hog.timer = 0.15;   // a moment with its prize before it turns for home
+          // It jumps for joy with its prize, on the spot, before it turns for home.
+          hog.joy = Sprites.cheer(0);
+          hog.timer = hog.joy;
           // Last of all: taking the final acorn ends the round, and the game may start another at once.
           world.take(acorn, 'groundhogs');
         }
@@ -499,7 +503,7 @@ const Rivals = (() => {
       squirrel.hop = 0;
       squirrel.timer = seconds;
       squirrel.strollTo = null;
-      squirrel.pause = 0.5 + world.random();
+      squirrel.pause = Math.max(0.5 + world.random(), squirrel.joy);
     }
 
     function step(squirrel, stepX, stepY, speed, dt) {
@@ -546,6 +550,7 @@ const Rivals = (() => {
 
     function updateSquirrel(squirrel, dt) {
       const tuning = TUNING.squirrel;
+      squirrel.joy = Math.max(0, squirrel.joy - dt);
       if (squirrel.state === 'rest') {
         squirrel.timer -= dt;
         if (squirrel.timer > 0) return stroll(squirrel, dt);
@@ -575,6 +580,7 @@ const Rivals = (() => {
       const dy = squirrel.target.y - 3 - squirrel.y;
       const distance = Math.hypot(dx, dy);
       if (distance < tuning.reach) {
+        squirrel.joy = Sprites.cheer(squirrel.joy);
         world.take(squirrel.target, 'squirrels');
         return rest(squirrel, between(tuning.rest));
       }
@@ -1004,7 +1010,7 @@ const Rivals = (() => {
       if (!active) return [];
       const list = squirrels.map((squirrel) => {
         const poses = Sprites.greySquirrel[squirrel.facing];
-        const hop = squirrel.moving ? [0, 1, 2, 1][Math.floor(squirrel.hop * 12) % 4] : 0;
+        const hop = squirrel.moving ? [0, 1, 2, 1][Math.floor(squirrel.hop * 12) % 4] : Sprites.joyLift(squirrel.joy, JOY_HEIGHT.squirrel);
         return {
           sprite: squirrel.moving ? poses.rest : Sprites.idleFrame(poses, squirrel.idle),
           x: Math.round(squirrel.x) - 8, y: Math.round(squirrel.y) - 15 - hop, depth: squirrel.y,
@@ -1013,9 +1019,11 @@ const Rivals = (() => {
       // The thief glances about before it climbs out; a visitor does so all the while it is up.
       groundhogPieces(list, hog, clock, hog.state === 'look' ? Sprites.groundhogLooks[Math.floor(hog.looked / 0.28) % 4] : Sprites.groundhog);
       if (isOut(hog)) {
-        const body = Sprites.groundhogWalk[hog.facing][Math.floor(hog.step * 10) % 2];
+        // Legs still while it jumps for joy; its prize goes up and down with it.
+        const lift = Sprites.joyLift(hog.joy, JOY_HEIGHT.groundhog);
+        const body = Sprites.groundhogWalk[hog.facing][hog.joy > 0 ? 0 : Math.floor(hog.step * 10) % 2];
         const x = Math.round(hog.x);
-        const y = Math.round(hog.y);
+        const y = Math.round(hog.y) - lift;
         list.push({ sprite: body, x: x - (body.width >> 1), y: y - body.height, depth: hog.y });
         // Its prize goes home in its mouth.
         if (hog.carrying) list.push({ sprite: Sprites.acorn, x: hog.facing === 'left' ? x - 14 : x + 6, y: y - 11, depth: hog.y + 0.05 });
