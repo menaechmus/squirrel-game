@@ -12,9 +12,15 @@ const Effects = (() => {
   // the park, with a little flutter on top so neighbours don't move in lockstep.
   function lean(x, y, clock) {
     const swell = Math.sin(clock * 0.9 - x * 0.012 + y * 0.004);
-    const gust = Math.max(0, Math.sin(clock * 0.35 - x * 0.004 + 1)) ** 3;
+    const blow = gust(x, clock);
     const flutter = Math.sin(clock * 5.3 + x * 0.37 + y * 0.21);
-    return swell * 0.6 + gust * 1.6 + flutter * (0.12 + gust * 0.3);
+    return swell * 0.6 + blow * 1.6 + flutter * (0.12 + blow * 0.3);
+  }
+
+  // How much of a gust is passing a spot, 0 to 1: one comes across the park
+  // about every 18 seconds and takes a few seconds to blow through.
+  function gust(x, clock) {
+    return Math.max(0, Math.sin(clock * 0.35 - x * 0.004 + 1)) ** 3;
   }
 
   function create(level) {
@@ -75,6 +81,7 @@ const Effects = (() => {
 
     return {
       lean,
+      gust,
       pondFrame: (clock) => Math.floor(clock * POND_FRAMES_PER_SECOND) % 4,
       update,
       drawLeaves,

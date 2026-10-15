@@ -12,15 +12,14 @@
   const MINIMAP_SHARE = 0.18;       // minimap width as a share of the screen's shorter side
   const BEST_KEY = 'squirrel-game-best-haul';
   const RIVAL_NAMES = { jays: 'Blue jays', groundhogs: 'Groundhogs', squirrels: 'Grey squirrels' };
-  // Each sound is a few square-wave notes: [frequency, delay, length].
-  const SOUNDS = {
-    pickup: [[880, 0, 0.08], [1320, 0.07, 0.12]],
-    stolen: [[520, 0, 0.09], [390, 0.08, 0.14]],
-    chirp: [[2100, 0, 0.05], [2600, 0.07, 0.05], [2100, 0.14, 0.06]],
-    scared: [[1500, 0, 0.05], [1100, 0.05, 0.08]],
-    rumble: [[110, 0, 0.12], [95, 0.1, 0.12]],
-    pop: [[300, 0, 0.05], [450, 0.04, 0.06]],
-    finish: [[523, 0, 0.25], [659, 0.12, 0.25], [784, 0.24, 0.25], [1047, 0.36, 0.25]],
+  const SOUND_KEY = 'squirrel-game-sound';   // 'off' once the player has turned sound off
+  // The speaker on the sound buttons, a pixel picture in three layers, each row
+  // marking its pixels with '#': the speaker, its sound waves (shown with sound
+  // on) and a cross (with sound off). 14 by 10 pixels.
+  const SPEAKER = {
+    body: ['......#', '.....##', '....###', '#######', '#######', '#######', '#######', '....###', '.....##', '......#'],
+    waves: ['', '..........#', '...........#', '........#...#', '.........#..#', '.........#..#', '........#...#', '...........#', '..........#', ''],
+    cross: ['', '', '........#....#', '.........#..#', '..........##', '..........##', '.........#..#', '........#....#', '', ''],
   };
 
   const el = (id) => document.getElementById(id);
@@ -58,8 +57,7 @@
   // Where the HUD sits, in game pixels, so hint arrows can keep clear of it.
   let hudBottom = 0;
   let minimapBox = { left: 0, top: 0, right: 0, bottom: 0 };
-  let audio = null;
-  let muted = false;
+  const sounds = Sound.create();
 
   const rivals = Rivals.create({
     level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView, puff,
@@ -98,34 +96,60 @@
 
   // ---- sound ----
 
-  function beep(frequency, delay, length, volume) {
-    if (!audio || muted) return;
-    const oscillator = audio.createOscillator();
-    const gain = audio.createGain();
-    const start = audio.currentTime + delay;
-    oscillator.type = 'square';
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.05 * volume, start);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + length);
-    oscillator.connect(gain).connect(audio.destination);
-    oscillator.start(start);
-    oscillator.stop(start + length);
-  }
-
-  // Play a named sound; one that happens far from the squirrel (`at`) is quieter.
+  // Play a named beep; one that happens far from the squirrel (`at`) is quieter.
   function sound(name, at) {
     const distance = at ? Math.hypot(at.x - player.x, at.y - player.y) : 0;
-    const volume = Math.max(0.2, 1 - distance / 400);
-    for (const [frequency, delay, length] of SOUNDS[name]) beep(frequency, delay, length, volume);
+    sounds.beep(name, Math.max(0.2, 1 - distance / 400));
   }
 
-  function unlockAudio() {
-    // Browsers only allow sound after a tap or click, so this runs from the Play button.
+  // Trees whose leaves rustle when a gust comes through.
+  const leafy = level.props.filter((prop) => Scenery.props[prop.sprite].hides && Scenery.props[prop.sprite].tops);
+
+  // What the squirrel can hear from where it stands: the nearest water, the
+  // waterfall, leaves in a gust (more trees round it, more rustle), and the
+  // animals up to something.
+  function listen(dt) {
+    const trees = leafy.filter((tree) => Math.abs(tree.x - player.x) < 110 && Math.abs(tree.y - player.y) < 110).length;
+    const gust = Math.max(0, Math.min(1, (effects.gust(player.x, clock) - 0.15) / 0.6));
+    sounds.update(dt, {
+      listener: player,
+      water: level.nearestWater(player.x, player.y),
+      falls: { distance: Math.hypot(level.falls.x - player.x, level.falls.y - player.y), dx: level.falls.x - player.x },
+      breeze: gust * Math.min(1, trees / 5),
+      voices: rivals.voices(),
+    });
+  }
+
+  // Sound is on unless the player turned it off last time (remembered in the browser).
+  function readSoundChoice() {
     try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      audio.resume();
+      return localStorage.getItem(SOUND_KEY) !== 'off';
     } catch (error) {
-      audio = null;
+      return true;
+    }
+  }
+
+  function saveSoundChoice(on) {
+    try {
+      localStorage.setItem(SOUND_KEY, on ? 'on' : 'off');
+    } catch (error) {
+      // Private browsing or storage disabled: the choice lasts until the page is closed.
+    }
+  }
+
+  // The speaker picture as an SVG, one small square per pixel.
+  function speakerPicture() {
+    const path = (rows) => rows.map((row, y) => [...row].map((pixel, x) => (pixel === '#' ? `M${x} ${y}h1v1h-1z` : '')).join('')).join('');
+    return '<svg viewBox="0 0 14 10" aria-hidden="true" shape-rendering="crispEdges">'
+      + `<path d="${path(SPEAKER.body)}"/><path class="waves" d="${path(SPEAKER.waves)}"/><path class="cross" d="${path(SPEAKER.cross)}"/></svg>`;
+  }
+
+  // Both sound buttons (in the top bar, and on the start and end screens) show the same thing.
+  function showSoundChoice() {
+    for (const id of ['mute', 'mute-menu']) {
+      el(id).classList.toggle('off', !sounds.isOn());
+      el(id).setAttribute('aria-pressed', String(sounds.isOn()));
+      el(id).title = sounds.isOn() ? 'Sound on' : 'Sound off';
     }
   }
 
@@ -176,6 +200,7 @@
     el('over').hidden = true;
     el('about').hidden = true;
     el('info').hidden = true;   // the About button is only for the start and end screens
+    el('mute-menu').hidden = true;   // in play, the sound button is in the top bar
     el('hud').hidden = false;
     updateHud();
     measureHud();
@@ -237,6 +262,7 @@
     el('hud').hidden = true;
     el('over').hidden = false;
     el('info').hidden = false;
+    el('mute-menu').hidden = false;
     el('again').focus();
     if (auto) {
       document.body.dataset.result = `you=${counts.you} jays=${counts.jays} groundhogs=${counts.groundhogs} squirrels=${counts.squirrels} total=${total} time=${time.toFixed(1)} noclips=${auto.noclips}`;
@@ -338,6 +364,7 @@
 
     // After the round the rivals carry on, so a jay still flies off with its prize.
     rivals.update(dt);
+    if (sounds.context()) listen(dt);
     if (state !== 'playing') return;
 
     time += dt;
@@ -495,12 +522,20 @@
   el('help').textContent = window.matchMedia('(pointer: coarse)').matches
     ? 'Drag anywhere on the screen to move.'
     : 'Move with WASD or the arrow keys, or drag with the mouse.';
-  el('play').addEventListener('click', () => { unlockAudio(); start(); });
-  el('again').addEventListener('click', () => { unlockAudio(); start(); });
-  el('mute').addEventListener('click', () => {
-    muted = !muted;
-    el('mute').textContent = muted ? 'Sound off' : 'Sound on';
-  });
+  el('play').addEventListener('click', () => { sounds.unlock(); start(); });
+  el('again').addEventListener('click', () => { sounds.unlock(); start(); });
+  sounds.setOn(readSoundChoice());
+  for (const id of ['mute', 'mute-menu']) {
+    el(id).innerHTML = speakerPicture();
+    el(id).addEventListener('click', () => {
+      sounds.setOn(!sounds.isOn());
+      saveSoundChoice(sounds.isOn());
+      showSoundChoice();
+    });
+  }
+  showSoundChoice();
+  // A hidden page (another tab, another app) goes quiet until it comes back.
+  document.addEventListener('visibilitychange', () => (document.hidden ? sounds.pause() : sounds.resume()));
   // The About panel (name and version) opens over the start or end screen.
   function showAbout(open) {
     el('about').hidden = !open;

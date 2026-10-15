@@ -310,6 +310,27 @@ const Level = (() => {
       creature.y = Math.min(SIZE - edge, Math.max(edge + 10, creature.y));
     }
 
+    // The nearest water to a spot, for the sound of it: how far to its edge
+    // (0 or less in it) and how far to the right of the spot that edge is.
+    function nearestWater(x, y) {
+      let best = { distance: Infinity, dx: 0 };
+      for (const each of ponds) {
+        const dx = x - each.x;
+        const dy = y - each.y;
+        const away = Math.hypot(dx, dy) || 0.01;
+        // How far out the shore is, along the line from the middle to the spot.
+        const shore = 1 / Math.hypot(dx / away / each.a, dy / away / each.b);
+        if (away - shore < best.distance) best = { distance: away - shore, dx: each.x + (dx / away) * shore - x };
+      }
+      for (let i = 0; i < streamPoints.length; i += 2) {
+        const point = streamPoints[i];
+        if (point.y > SIZE) continue;   // past the edge of the park, where it runs out under the hedge
+        const distance = Math.hypot(x - point.x, y - point.y) - point.half;
+        if (distance < best.distance) best = { distance, dx: point.x - x };
+      }
+      return best;
+    }
+
     // Is a circle here touching scenery, water or the hedge?
     function blocked(x, y, radius) {
       return !inPark(x, y, radius) || inAnyPond(x, y, radius + 6)
@@ -533,7 +554,7 @@ const Level = (() => {
     }
 
     return {
-      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, logs, props, acorns, pushOut, blocked,
+      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, falls, logs, props, acorns, pushOut, blocked, nearestWater,
       wayTo, nearestByWay, clearLine, distancesFrom, distanceTo,
       // For tests: the route grid, and which acorns had to move for the new features.
       grid: { cell: CELL, cols: COLS, open, isOpen: (x, y) => open[cellOf(x, y)] === 1 }, movedAcorns: moved.length,

@@ -1079,8 +1079,23 @@ const Rivals = (() => {
       return list;
     }
 
+    // What can be heard, for the park's background sounds: jays sitting, coming
+    // down or flying past, and groundhogs digging (the thief too, under its
+    // rumble). It only looks; nothing here changes what any animal does.
+    function voices() {
+      const list = [];
+      for (const bird of perchers) {
+        if (bird.state === 'sit') list.push({ who: bird, kind: 'sitting', x: bird.x, y: bird.y });
+        else if (bird.state === 'arrive') list.push({ who: bird, kind: 'landing', x: bird.x, y: bird.y });
+      }
+      for (const bird of passers) list.push({ who: bird, kind: 'flying', x: bird.x, y: bird.y });
+      for (const visitor of visitors) if (visitor.state === 'mound') list.push({ who: visitor, kind: 'digging', x: visitor.x, y: visitor.y });
+      if (hog.state === 'mound') list.push({ who: hog, kind: 'digging', x: hog.home.x, y: hog.home.y });
+      return list;
+    }
+
     return {
-      reset, update, decals, shadows, things, flyers,
+      reset, update, decals, shadows, things, flyers, voices,
       // For tests: a live view of each creature's state.
       inspect: () => ({ jay, hog, squirrels, holes, passers, perchers, visitors }),
     };

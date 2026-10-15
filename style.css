@@ -68,14 +68,29 @@ body {
   image-rendering: pixelated;
 }
 
+/* The sound button: a pixel speaker, with sound waves when on and a cross when off. */
 #mute {
   pointer-events: auto;
-  font: inherit;
-  font-size: 0.7em;
   color: #fff;
   background: rgba(0, 0, 0, 0.45);
   border: 2px solid #fff;
   padding: 4px 8px;
+  cursor: pointer;
+}
+
+#mute svg,
+#mute-menu svg {
+  display: block;
+  width: 28px;
+  height: 20px;
+  fill: currentColor;
+}
+
+#mute.off .waves,
+#mute-menu.off .waves,
+#mute:not(.off) .cross,
+#mute-menu:not(.off) .cross {
+  display: none;
 }
 
 /* Start and end screens. Spacing shrinks on short screens (a phone held
@@ -165,6 +180,20 @@ body {
   background: rgba(0, 0, 0, 0.45);
   border: 2px solid #f0c670;
   border-radius: 50%;
+  cursor: pointer;
+}
+
+/* The same sound button on the start and end screens, in the corner opposite the "i". */
+#mute-menu {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+  height: 36px;
+  padding: 0 7px;
+  color: #f0c670;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid #f0c670;
+  border-radius: 18px;
   cursor: pointer;
 }
 

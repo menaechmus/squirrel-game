@@ -8,7 +8,7 @@
 <!-- The version appears in the About panel and as ?v= on every file below.
      Change them all together for each release, so a browser holding old
      files fetches a matching new set. -->
-<link rel="stylesheet" href="style.css?v=1.9">
+<link rel="stylesheet" href="style.css?v=1.10">
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -16,7 +16,7 @@
 <div id="hud" hidden>
   <div id="hud-row">
     <span id="acorns">Acorns 0</span>
-    <button id="mute" type="button" aria-label="Toggle sound">Sound on</button>
+    <button id="mute" type="button" aria-label="Sound" aria-pressed="true"></button>
     <span id="time">0:00.0</span>
   </div>
   <canvas id="minimap" width="48" height="48" aria-label="Map of the park"></canvas>
@@ -41,21 +41,23 @@
 </div>
 
 <button id="info" type="button" aria-label="About this game">i</button>
+<button id="mute-menu" type="button" aria-label="Sound" aria-pressed="true"></button>
 
 <div id="about" class="panel" hidden>
   <h1>Squirrel Game</h1>
-  <p id="version">Version 1.9 &middot; 15 October 2026</p>
-  <p class="dim">New in this version: a bigger mountain at the east edge, with rock behind its waterfall and a foaming pool at its foot, and a more natural stream that runs on past the pond, under a second log bridge and out of the park.</p>
+  <p id="version">Version 1.10 &middot; 15 October 2026</p>
+  <p class="dim">New in this version: quiet sounds of the park round you (water, the waterfall, leaves in a gust, jays singing, groundhogs digging) and a speaker button to turn sound on or off.</p>
   <button id="close-about" type="button">Close</button>
 </div>
 
-<script src="js/sprites.js?v=1.9"></script>
-<script src="js/scenery.js?v=1.9"></script>
-<script src="js/effects.js?v=1.9"></script>
-<script src="js/level.js?v=1.9"></script>
-<script src="js/input.js?v=1.9"></script>
-<script src="js/hud.js?v=1.9"></script>
-<script src="js/rivals.js?v=1.9"></script>
-<script src="js/game.js?v=1.9"></script>
+<script src="js/sprites.js?v=1.10"></script>
+<script src="js/scenery.js?v=1.10"></script>
+<script src="js/effects.js?v=1.10"></script>
+<script src="js/level.js?v=1.10"></script>
+<script src="js/input.js?v=1.10"></script>
+<script src="js/hud.js?v=1.10"></script>
+<script src="js/rivals.js?v=1.10"></script>
+<script src="js/sound.js?v=1.10"></script>
+<script src="js/game.js?v=1.10"></script>
 </body>
 </html>
