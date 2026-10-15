@@ -498,6 +498,9 @@ const Rivals = (() => {
 
     // ---- grey squirrels ----
 
+    // Where a squirrel stands to pick an acorn up.
+    const pickupSpot = (acorn) => ({ x: acorn.x, y: acorn.y - 3 });
+
     function rest(squirrel, seconds) {
       release(squirrel);
       squirrel.state = 'rest';
@@ -532,7 +535,7 @@ const Rivals = (() => {
         const angle = world.random() * Math.PI * 2;
         const distance = 30 + world.random() * 60;
         const spot = { x: squirrel.x + Math.cos(angle) * distance, y: squirrel.y + Math.sin(angle) * distance };
-        if (!level.blocked(spot.x, spot.y, 6)) {
+        if (!level.blocked(spot.x, spot.y, 6) && level.clearLine(squirrel, spot)) {
           squirrel.strollTo = spot;
           squirrel.strollTime = 0;
         }
@@ -556,20 +559,20 @@ const Rivals = (() => {
       if (squirrel.state === 'rest') {
         squirrel.timer -= dt;
         if (squirrel.timer > 0) return stroll(squirrel, dt);
-        let nearest = null;
-        for (const acorn of world.acorns()) {
-          if (acorn.claimedBy || acorn === squirrel.gaveUpOn) continue;
-          if (!nearest || Math.hypot(acorn.x - squirrel.x, acorn.y - squirrel.y) < Math.hypot(nearest.x - squirrel.x, nearest.y - squirrel.y)) {
-            nearest = acorn;
-          }
-        }
+        // The acorn nearest by the way it would have to go: round ponds, the
+        // hill and logs, over the bridge if it is across the stream.
+        const free = world.acorns().filter((acorn) => !acorn.claimedBy && acorn !== squirrel.gaveUpOn);
+        const found = free.length ? level.nearestByWay(squirrel, free.map(pickupSpot)) : null;
         squirrel.gaveUpOn = null;
-        if (!nearest) {
+        if (!found) {
           squirrel.timer = 1;
           return;
         }
+        const nearest = free[found.index];
         claim(squirrel, nearest);
         squirrel.state = 'run';
+        squirrel.way = found.way;
+        squirrel.leg = 0;
         squirrel.best = Infinity;
         squirrel.stalled = 0;
         squirrel.detour = 0;
@@ -587,17 +590,25 @@ const Rivals = (() => {
         return rest(squirrel, between(tuning.rest));
       }
 
-      // Run straight at the acorn. With no path-finding, a squirrel that stops
-      // getting closer side-steps for a moment, and eventually tries another acorn.
-      let stepX = dx / distance;
-      let stepY = dy / distance;
+      // Run along its way, waypoint by waypoint. If it stops getting closer it
+      // side-steps for a moment, works out its way again, and in the end tries
+      // another acorn.
+      let goal = squirrel.way[squirrel.leg];
+      if (squirrel.leg < squirrel.way.length - 1 && Math.hypot(goal.x - squirrel.x, goal.y - squirrel.y) < 5) {
+        squirrel.leg++;
+        squirrel.best = Infinity;
+        goal = squirrel.way[squirrel.leg];
+      }
+      const toGoal = Math.hypot(goal.x - squirrel.x, goal.y - squirrel.y) || 0.01;
+      let stepX = (goal.x - squirrel.x) / toGoal;
+      let stepY = (goal.y - squirrel.y) / toGoal;
       if (squirrel.detour > 0) {
         squirrel.detour -= dt;
         stepX = squirrel.detourX;
         stepY = squirrel.detourY;
         if (squirrel.detour <= 0) squirrel.best = Infinity;
-      } else if (distance < squirrel.best - 1) {
-        squirrel.best = distance;
+      } else if (toGoal < squirrel.best - 1) {
+        squirrel.best = toGoal;
         squirrel.stalled = 0;
       } else {
         squirrel.stalled += dt;
@@ -606,6 +617,10 @@ const Rivals = (() => {
           if (squirrel.failures > 6) {
             squirrel.gaveUpOn = squirrel.target;
             return rest(squirrel, 1);
+          }
+          if (squirrel.failures === 3) {
+            squirrel.way = level.wayTo(squirrel, pickupSpot(squirrel.target)) || [pickupSpot(squirrel.target)];
+            squirrel.leg = 0;
           }
           const side = world.random() < 0.5 ? -1 : 1;
           squirrel.detour = 0.5;

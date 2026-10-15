@@ -32,6 +32,7 @@
   const level = Level.generate();
   const ground = Scenery.buildGround(level);
   const pond = Scenery.buildPond(level);
+  const brook = Scenery.buildBrook(level);   // the stream, the second pond and the log bridge
   const miniature = Hud.buildMinimap(level);
   const effects = Effects.create(level);
   const total = level.acorns.length;
@@ -41,7 +42,7 @@
   // the rivals' luck.
   const params = new URLSearchParams(location.search);
   const auto = params.has('autoplay')
-    ? { speed: Number(params.get('autoplay')) || 1, pace: params.has('pace') ? Number(params.get('pace')) : 1, target: null, best: Infinity, stalled: 0, noclip: 0, noclips: 0 }
+    ? { speed: Number(params.get('autoplay')) || 1, pace: params.has('pace') ? Number(params.get('pace')) : 1, target: null, way: null, leg: 0, best: Infinity, stalled: 0, noclip: 0, noclips: 0 }
     : null;
   const random = seededRandom(params.has('seed') ? Number(params.get('seed')) : auto ? 1 : Date.now());
 
@@ -265,17 +266,32 @@
     return nearest;
   }
 
+  // The test squirrel heads for the nearest acorn as the crow flies. When
+  // something is in that straight line it takes the way round, as a person
+  // would: round the ponds and the hill, over the bridge.
   function autoVector(dt) {
     const nearest = nearestAcorn();
     if (!nearest) return { x: 0, y: 0 };
-    const nearestDistance = Math.hypot(nearest.x - player.x, nearest.y - player.y);
-    if (nearest !== auto.target) {
+    const far = (acorn) => Math.hypot(acorn.x - player.x, acorn.y - player.y);
+    // While going the long way round it keeps to its acorn unless one is clearly nearer, so it does not dither.
+    const detouring = auto.way && auto.way.length > 1;
+    if (nearest !== auto.target && (!detouring || !acorns.includes(auto.target) || far(nearest) < far(auto.target) - 16)) {
+      const spot = { x: nearest.x, y: nearest.y - 3 };
       auto.target = nearest;
       auto.best = Infinity;
+      auto.way = level.clearLine(player, spot) ? [spot] : level.wayTo(player, spot) || [spot];
+      auto.leg = 0;
     }
-    // No pathfinding: if scenery blocks the straight line for a while, pass through it.
-    if (nearestDistance < auto.best - 1) {
-      auto.best = nearestDistance;
+    let goal = auto.way[auto.leg];
+    if (auto.leg < auto.way.length - 1 && Math.hypot(goal.x - player.x, goal.y - player.y) < 5) {
+      auto.leg++;
+      auto.best = Infinity;
+      goal = auto.way[auto.leg];
+    }
+    const distance = Math.hypot(goal.x - player.x, goal.y - player.y) || 0.01;
+    // If it stops getting closer for a while, it pushes through the scenery (never through water).
+    if (distance < auto.best - 1) {
+      auto.best = distance;
       auto.stalled = 0;
     } else {
       auto.stalled += dt;
@@ -285,7 +301,7 @@
       }
     }
     auto.noclip -= dt;
-    return { x: ((nearest.x - player.x) / nearestDistance) * auto.pace, y: ((nearest.y - player.y) / nearestDistance) * auto.pace };
+    return { x: ((goal.x - player.x) / distance) * auto.pace, y: ((goal.y - player.y) / distance) * auto.pace };
   }
 
   // Standing still, the squirrel sniffs out the nearest acorn: it turns to face
@@ -340,7 +356,7 @@
       player.idle += dt;
       sniffAround();
     }
-    if (!(auto && auto.noclip > 0)) level.pushOut(player, PLAYER_RADIUS);
+    level.pushOut(player, PLAYER_RADIUS, !(auto && auto.noclip > 0));
 
     for (const acorn of acorns.slice()) {
       if (Math.hypot(acorn.x - player.x, acorn.y - 3 - player.y) <= PICKUP_RADIUS) takeAcorn(acorn, 'you');
@@ -371,6 +387,7 @@
     ctx.fillRect(0, 0, viewW, viewH);
     ctx.drawImage(ground, -camX, -camY);
     ctx.drawImage(pond.frames[effects.pondFrame(clock)], pond.x - camX, pond.y - camY);
+    ctx.drawImage(brook.frames[Scenery.flowFrame(clock)], brook.x - camX, brook.y - camY);
     for (const decal of rivals.decals()) ctx.drawImage(decal.sprite, decal.x - camX, decal.y - camY);
 
     const px = Math.round(player.x) - camX;
@@ -394,7 +411,7 @@
       const x = prop.x - (width >> 1) - camX;
       const y = prop.y - height - camY;
       if (x < viewW && y < viewH && x + width > 0 && y + height > 0) {
-        const sprite = art.frames.length === 1 ? art.frames[0] : Scenery.frame(art, effects.lean(prop.x, prop.y, clock));
+        const sprite = art.frames.length === 1 ? art.frames[0] : Scenery.frame(art, effects.lean(prop.x, prop.y, clock), clock);
         things.push({ sprite, x, y, depth: prop.y });
         if (art.hides && prop.y > player.y && px > x && px < x + width && py - 8 > y && py - 8 < y + height) {
           behindTree = true;

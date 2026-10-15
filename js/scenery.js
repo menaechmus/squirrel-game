@@ -359,6 +359,86 @@ const Scenery = (() => {
     return c;
   }
 
+  // ---- logs and the rocky hill ----
+
+  function flipped(sprite) {
+    const c = canvas(sprite.width, sprite.height);
+    const g = c.getContext('2d');
+    g.scale(-1, 1);
+    g.drawImage(sprite, -sprite.width, 0);
+    return c;
+  }
+
+  // A fallen log lying across the screen, its sawn end, ringed, to the right.
+  function fallenLog(length, seed, moss) {
+    const h = 11;
+    const c = canvas(length, h);
+    const endX = length - 4.5;   // middle of the sawn end
+    const inEnd = (x, y) => inEllipse(x, y, endX, h / 2, 3.5, h / 2 - 0.5);
+    // The far end is rounded off where it broke from its stump.
+    const inBody = (x, y) => x >= 1 && x < endX && y >= 1 && y < h - 1 && !(x < 3 && (y < 3 || y > h - 4));
+    paint(c.getContext('2d'), length, h, (x, y) => inBody(x, y) || inEnd(x, y), (x, y) => {
+      if (inEnd(x, y)) {
+        const ring = Math.hypot((x + 0.5 - endX) / 3.5, (y + 0.5 - h / 2) / (h / 2 - 0.5));
+        return ring > 0.78 ? '#8f6a3f' : ring > 0.42 && ring < 0.6 ? '#c49a5e' : '#e6c690';
+      }
+      let shade = 0.12 + (y / (h - 1)) * 0.78;
+      if ((x * 7 + Math.floor(y / 2) * 3) % 6 === 0) shade += 0.22;   // furrows in the bark
+      if (moss && y < 5 && smoothNoise(x, y, 4, seed) > 0.52) return tone(RAMPS.moss, shade, x, y);
+      return tone(RAMPS.bark, shade, x, y, false);
+    }, OUTLINE.bark);
+    return c;
+  }
+
+  // The rocky hill: a pile of craggy boulders, the tallest at the back, mossy
+  // on top, with a cleft between two in front where a spring comes down. The
+  // waterfall is a prop of its own ('falls'), drawn over the cleft.
+  const HILL = { w: 132, h: 92, fallsX: -18, fallsTop: 30 };
+  function rockyHill() {
+    const { w, h } = HILL;
+    const c = canvas(w, h);
+    const g = c.getContext('2d');
+    // Each boulder: left, top, width, height, rock, how much moss on top. Back row first.
+    const boulders = [
+      [38, 2, 52, 62, RAMPS.basalt, 0.3], [76, 16, 42, 50, RAMPS.granite, 0.32], [12, 22, 38, 46, RAMPS.granite, 0.3],
+      [96, 40, 34, 36, RAMPS.basalt, 0.34], [0, 46, 44, 38, RAMPS.basalt, 0.32],
+      [62, 50, 46, 34, RAMPS.granite, 0.3], [4, 62, 38, 30, RAMPS.granite, 0.22], [54, 60, 52, 32, RAMPS.basalt, 0.2], [100, 66, 32, 26, RAMPS.granite, 0.25],
+    ];
+    boulders.forEach(([left, top, bw, bh, ramp, moss], index) => {
+      const [piece] = rock({ seed: 401 + index, w: bw, h: bh, ramp, shape: boulder(bw, bh), facets: 6 + (bw >> 3), speckle: 0.06, moss, cracks: bw > 40 ? 2 : 1 });
+      g.drawImage(piece, left, top);
+    });
+    // The cleft, in deep shade, from the spring down to the foot of the hill.
+    const middle = (w >> 1) + HILL.fallsX;
+    const pixels = g.getImageData(0, 0, w, h).data;
+    for (let y = HILL.fallsTop - 2; y < h; y++) {
+      if (!pixels[(middle + y * w) * 4 + 3]) continue;
+      g.fillStyle = OUTLINE.stone;
+      g.fillRect(middle - 4, y, 9, 1);
+      g.fillStyle = RAMPS.basalt[4];
+      g.fillRect(middle - 3, y, 7, 1);
+    }
+    return [c];
+  }
+
+  // The waterfall down the cleft, in four frames: streaks of light running
+  // down, foam where it lands.
+  function waterfall() {
+    const w = 7;
+    const h = HILL.h - HILL.fallsTop + 3;
+    const frames = [];
+    for (let f = 0; f < 4; f++) {
+      frames.push(pixelCanvas(w, h, (x, y) => {
+        if (x === 0 || x === w - 1) return y > 1 && y < h - 3 ? '#3a7ec6' : null;
+        if (y >= h - 4) return (x + y + f) % 3 === 0 ? '#86c2f2' : '#ffffff';   // foam
+        const streak = (y - f * 4 + x * 5) % 9;
+        if (streak < 3) return '#d4eeff';
+        return x === 1 || x === w - 2 ? '#4a90d9' : '#62a6e6';
+      }));
+    }
+    return frames;
+  }
+
   // ---- the catalogue ----
 
   // Where a bird could sit on a tree: the middle of the top row of a frame, as
@@ -426,14 +506,30 @@ const Scenery = (() => {
   }
   define('mushroom', [Sprites.mushroom], {});
 
+  // Logs lie still; their sawn ends face either way.
+  const logLong = fallenLog(32, 501, true);
+  const logShort = fallenLog(22, 502, false);
+  define('logLong', [logLong], { shadow: [34, 6] });
+  define('logLongL', [flipped(logLong)], { shadow: [34, 6] });
+  define('logShort', [logShort], { shadow: [24, 6] });
+  define('logShortL', [flipped(logShort)], { shadow: [24, 6] });
+  // The hill hides what is behind it, as a tree top does; its waterfall runs on the clock, not the wind.
+  define('hill', rockyHill(), { hides: true, shadow: [140, 22], falls: { dx: HILL.fallsX, top: HILL.fallsTop } });
+  define('falls', waterfall(), { flows: true });
+
   // Which frame of a prop shows for a given wind strength.
   function frameIndex(art, lean) {
     if (art.frames.length === 1) return 0;
     return Math.max(0, Math.min(art.frames.length - 1, Math.round(art.rest + lean * art.gain)));
   }
 
-  // The frame of a prop to draw for a given wind strength.
-  function frame(art, lean) {
+  // Running water changes frame this often, a second.
+  const FLOW_FRAMES_PER_SECOND = 6;
+  const flowFrame = (clock) => Math.floor(clock * FLOW_FRAMES_PER_SECOND) % 4;
+
+  // The frame of a prop to draw for a given wind strength; running water goes by the clock.
+  function frame(art, lean, clock = 0) {
+    if (art.flows) return art.frames[flowFrame(clock)];
     return art.frames[frameIndex(art, lean)];
   }
 
@@ -494,48 +590,96 @@ const Scenery = (() => {
     return c;
   }
 
-  // The pond as four frames: glints drift across and the shoreline shimmers.
+  // A pond's water: the colour at park pixel (px, py) in frame `f`, or null
+  // beyond its shore. Glints drift across and the shoreline shimmers.
+  function pondWater(pond, rand) {
+    const lit = [new Set(), new Set(), new Set(), new Set()];
+    for (let i = 0; i < 46; i++) {
+      const angle = rand() * TAU;
+      const reach = Math.sqrt(rand()) * 0.8;
+      const x = Math.round(pond.x + Math.cos(angle) * pond.a * reach);
+      const y = Math.round(pond.y + Math.sin(angle) * pond.b * reach);
+      const length = 2 + Math.floor(rand() * 3);
+      const phase = Math.floor(rand() * 4);
+      for (let f = 0; f < 4; f++) {
+        const step = (f + phase) % 4;
+        if (step === 3) continue;   // each glint winks out for one frame, then starts again
+        for (let i2 = 0; i2 < length; i2++) lit[f].add((x + step * 2 + i2) + ',' + y);
+      }
+    }
+    return (px, py, f) => {
+      const dx = px + 0.5 - pond.x;
+      const dy = py + 0.5 - pond.y;
+      const angle = Math.atan2(dy, dx);
+      const n = ((dx / pond.a) ** 2 + (dy / pond.b) ** 2) * (1 + 0.05 * Math.sin(angle * 6));
+      if (n >= 1.1) return null;
+      if (n >= 1) return '#3a7a32';   // damp grass at the water's edge
+      if (n >= 0.9) return (Math.floor((angle + Math.PI) * 9) + f) % 4 === 0 ? '#d4eeff' : '#86c2f2';
+      if (lit[f].has(px + ',' + py)) return '#b6dcff';
+      const checker = (px + py) % 2 === 0;
+      if (n < 0.45 || (n < 0.52 && checker)) return '#3a7ec6';
+      if (n < 0.75 || (n < 0.8 && checker)) return '#4a90d9';
+      return '#62a6e6';
+    };
+  }
+
+  // The pond as four frames.
   function buildPond(level) {
     const pond = level.pond;
-    const rand = seededRandom(55);
+    const water = pondWater(pond, seededRandom(55));
     const pad = 8;
     const left = Math.floor(pond.x - pond.a - pad);
     const top = Math.floor(pond.y - pond.b - pad);
     const w = Math.ceil(pond.a * 2 + pad * 2);
     const h = Math.ceil(pond.b * 2 + pad * 2);
-    const glints = [];
-    for (let i = 0; i < 46; i++) {
-      const angle = rand() * TAU;
-      const reach = Math.sqrt(rand()) * 0.8;
-      glints.push({
-        x: Math.round(pond.x + Math.cos(angle) * pond.a * reach) - left,
-        y: Math.round(pond.y + Math.sin(angle) * pond.b * reach) - top,
-        length: 2 + Math.floor(rand() * 3),
-        phase: Math.floor(rand() * 4),
-      });
-    }
+    const frames = [];
+    for (let f = 0; f < 4; f++) frames.push(pixelCanvas(w, h, (x, y) => water(x + left, y + top, f)));
+    return { x: left, y: top, frames };
+  }
+
+  // The stream from the hill's waterfall to the second pond, and that pond,
+  // as one picture in four frames, with the log bridge laid across the stream.
+  // Glints run downstream; foam where the waterfall lands.
+  function buildBrook(level) {
+    const { points, half, bridge } = level.stream;
+    const pond = level.ponds[1];
+    const water = pondWater(pond, seededRandom(56));
+    const pad = 10;
+    const xs = points.map((point) => point.x).concat(pond.x - pond.a, pond.x + pond.a);
+    const ys = points.map((point) => point.y).concat(pond.y - pond.b, pond.y + pond.b);
+    const left = Math.floor(Math.min(...xs) - pad);
+    const top = Math.floor(Math.min(...ys) - pad);
+    const w = Math.ceil(Math.max(...xs) + pad) - left;
+    const h = Math.ceil(Math.max(...ys) + pad) - top;
+    // Nearest point of the stream's course to each pixel, worked out once.
+    const nearest = new Int16Array(w * h).fill(-1);
+    const away = new Float32Array(w * h).fill(Infinity);
+    points.forEach((point, index) => {
+      for (let y = Math.max(0, Math.floor(point.y - half - 3 - top)); y <= Math.min(h - 1, Math.ceil(point.y + half + 3 - top)); y++) {
+        for (let x = Math.max(0, Math.floor(point.x - half - 3 - left)); x <= Math.min(w - 1, Math.ceil(point.x + half + 3 - left)); x++) {
+          const d = Math.hypot(x + left + 0.5 - point.x, y + top + 0.5 - point.y);
+          if (d < away[x + y * w]) { away[x + y * w] = d; nearest[x + y * w] = index; }
+        }
+      }
+    });
+    const log = fallenLog(bridge.length, 503, false);
     const frames = [];
     for (let f = 0; f < 4; f++) {
-      const lit = new Set();
-      for (const glint of glints) {
-        const step = (f + glint.phase) % 4;
-        if (step === 3) continue;   // each glint winks out for one frame, then starts again
-        for (let i = 0; i < glint.length; i++) lit.add(glint.x + step * 2 + i + glint.y * w);
-      }
-      frames.push(pixelCanvas(w, h, (x, y) => {
-        const dx = x + left + 0.5 - pond.x;
-        const dy = y + top + 0.5 - pond.y;
-        const angle = Math.atan2(dy, dx);
-        const n = ((dx / pond.a) ** 2 + (dy / pond.b) ** 2) * (1 + 0.05 * Math.sin(angle * 6));
-        if (n >= 1.1) return null;
-        if (n >= 1) return '#3a7a32';   // damp grass at the water's edge
-        if (n >= 0.9) return (Math.floor((angle + Math.PI) * 9) + f) % 4 === 0 ? '#d4eeff' : '#86c2f2';
-        if (lit.has(x + y * w)) return '#b6dcff';
-        const checker = (x + y) % 2 === 0;
-        if (n < 0.45 || (n < 0.52 && checker)) return '#3a7ec6';
-        if (n < 0.75 || (n < 0.8 && checker)) return '#4a90d9';
-        return '#62a6e6';
-      }));
+      const frame = pixelCanvas(w, h, (x, y) => {
+        const inPond = water(x + left, y + top, f);
+        if (inPond && inPond !== '#3a7a32') return inPond;
+        const d = away[x + y * w];
+        if (d >= half + 1.2) return inPond;
+        if (d >= half) return '#3a7a32';
+        const s = points[nearest[x + y * w]].s;
+        if (s < 7) return (x + y + f) % 3 === 0 ? '#d4eeff' : '#ffffff';   // foam below the waterfall
+        // Glints, two pixels long, running downstream three pixels a frame.
+        if (d < half - 1 && (s - f * 3 + (x % 3) * 7) % 11 < 2) return '#b6dcff';
+        return d < half - 1.5 ? '#3a7ec6' : '#4a90d9';
+      });
+      // Two logs side by side make the bridge.
+      for (const dy of [-12, -3]) frame.getContext('2d').drawImage(log, Math.round(bridge.x - left - bridge.length / 2), Math.round(bridge.y - top + dy));
+      frames.push(frame);
     }
     return { x: left, y: top, frames };
   }
@@ -562,9 +706,11 @@ const Scenery = (() => {
   return {
     props,
     frame,
+    flowFrame,
     top,
     buildGround,
     buildPond,
+    buildBrook,
     clouds: [cloud(1, 250, 120), cloud(2, 200, 110), cloud(3, 280, 140), cloud(4, 220, 100), cloud(5, 180, 120)],
   };
 })();
