@@ -560,7 +560,7 @@ const Rivals = (() => {
         squirrel.timer -= dt;
         if (squirrel.timer > 0) return stroll(squirrel, dt);
         // The acorn nearest by the way it would have to go: round ponds, the
-        // hill and logs, over the bridge if it is across the stream.
+        // mountain and logs, over a bridge if it is across the stream.
         const free = world.acorns().filter((acorn) => !acorn.claimedBy && acorn !== squirrel.gaveUpOn);
         const found = free.length ? level.nearestByWay(squirrel, free.map(pickupSpot)) : null;
         squirrel.gaveUpOn = null;

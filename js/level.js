@@ -11,16 +11,29 @@ const Level = (() => {
   const ACORNS_BY_BUSHES = 12;
   const TUFT_COUNT = 260;
 
-  // The south of the park, added later from a seed of its own so that the rest
-  // of the park stayed where it was: a rocky hill with a waterfall, the stream
-  // it feeds, a second pond, a log bridge over the stream, and logs about the park.
+  // The south-east, added later from a seed of its own so that the rest of the
+  // park stayed where it was: a rocky mountain against the east hedge with a
+  // waterfall down its face, the stream it feeds, which runs into a second pond
+  // and on out through the south hedge, a log bridge over each stretch, and
+  // logs about the park.
   const SOUTH_SEED = 20261014;
-  const HILL_AT = { x: 690, y: 705 };                     // the middle of the hill's foot
-  const SMALL_POND = { x: 590, y: 864, a: 36, b: 22 };
-  // The stream's course from the foot of the waterfall to the pond, smoothed into a curve.
-  const STREAM_COURSE = [[672, 706], [668, 730], [662, 752], [659, 772], [655, 792], [642, 812], [622, 830], [604, 845]];
-  const STREAM_HALF = 3.5;    // half the stream's width
-  const BRIDGE = { along: 66, length: 26, gap: 28 };      // how far down the stream, how long its logs, how much of the stream it spans
+  const MOUNTAIN_MIDDLE = 640;   // how far down the east edge the middle of the mountain is
+  const SMALL_POND = { x: 745, y: 835, a: 36, b: 22 };
+  // The stream in two stretches, each smoothed into a curve: from the foot of
+  // the waterfall (wherever the mountain's picture puts it) into the pond, and
+  // from the pond out through the hedge, past the edge of the park.
+  const STREAM_COURSES = [
+    [[864, 718], [870, 744], [872, 770], [866, 794], [846, 812], [818, 824], [790, 831], [768, 834]],
+    [[738, 848], [732, 872], [737, 896], [744, 918], [739, 940], [735, 968]],
+  ];
+  // How wide the water is either side of each stretch's line, `s` pixels down
+  // it: wandering a little, and wide in the pool under the waterfall.
+  const STREAM_HALF = [
+    (s) => 3.7 + s * 0.004 + 0.55 * Math.sin(s * 0.11 + 0.7) + 0.3 * Math.sin(s * 0.29) + 9 * Math.cos(Math.min(1, Math.abs(s - 10) / 16) * Math.PI / 2) ** 2,
+    (s) => 4.3 + 0.5 * Math.sin(s * 0.13 + 2.1) + 0.3 * Math.sin(s * 0.31 + 0.4),
+  ];
+  // Each stretch's log bridge: how far down the stretch, how long its logs, how much of the stream it spans.
+  const BRIDGES = [{ along: 74, length: 26, gap: 28 }, { along: 37, length: 26, gap: 28 }];
   const LOG_COUNT = 10;
   const LOGS = ['logLong', 'logLong', 'logLongL', 'logShort', 'logShortL', 'logShortL'];
 
@@ -134,41 +147,58 @@ const Level = (() => {
       if (!inPond(x, y, 6)) props.push({ sprite: 'tuft', x, y });
     }
 
-    // ---- the south: the hill, its stream, the second pond, the bridge, and logs ----
+    // ---- the south-east: the mountain, its stream, the second pond, the bridges, and logs ----
     // Everything up to here is exactly as it was before these were added.
     const southRandom = seededRandom(SOUTH_SEED);
     const smallPond = { x: SMALL_POND.x, y: SMALL_POND.y, a: SMALL_POND.a, b: SMALL_POND.b };
     const ponds = [pond, smallPond];
     const inAnyPond = (x, y, pad) => ponds.some((each) => ((x - each.x) / (each.a + pad)) ** 2 + ((y - each.y) / (each.b + pad)) ** 2 < 1);
 
-    // The stream: a smooth curve through its course, a point every pixel or so,
-    // each with its distance `s` downstream.
-    const course = STREAM_COURSE.map(([x, y]) => ({ x, y }));
-    const points = [];
-    for (let i = 0; i < course.length - 1; i++) {
-      const [p0, p1, p2, p3] = [course[Math.max(0, i - 1)], course[i], course[i + 1], course[Math.min(course.length - 1, i + 2)]];
-      const steps = Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y));
-      for (let k = 0; k < steps; k++) {
-        const u = k / steps;
-        const spline = (a, b, c, d) => 0.5 * (2 * b + (c - a) * u + (2 * a - 5 * b + 4 * c - d) * u * u + (3 * b - a - 3 * c + d) * u * u * u);
-        points.push({ x: spline(p0.x, p1.x, p2.x, p3.x), y: spline(p0.y, p1.y, p2.y, p3.y) });
-      }
-    }
-    points.push(course[course.length - 1]);
-    points[0].s = 0;
-    for (let i = 1; i < points.length; i++) points[i].s = points[i - 1].s + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-    const bridgePoint = points.find((point) => point.s >= BRIDGE.along);
-    const stream = { points, half: STREAM_HALF, bridge: { x: bridgePoint.x, y: bridgePoint.y, s: bridgePoint.s, length: BRIDGE.length, gap: BRIDGE.gap } };
-    const nearStream = (x, y, pad) => points.some((point) => Math.hypot(x - point.x, y - point.y) < STREAM_HALF + pad);
+    // The mountain: solid over the whole of its picture, a shape whose middle is
+    // on the east edge, so that half of it runs on beyond the park.
+    const mountainArt = Scenery.props.mountain;
+    const picture = mountainArt.frames[0];
+    const foot = { x: SIZE, y: MOUNTAIN_MIDDLE, shape: mountainArt.foot.shape };
+    const mountain = { x: SIZE - mountainArt.foot.dx, y: MOUNTAIN_MIDDLE - mountainArt.foot.dy, w: picture.width, h: picture.height, foot };
+    const onMountain = (x, y, pad) => foot.shape(x - foot.x, y - foot.y, pad) < 1;
+    const falls = { x: mountain.x + mountainArt.falls.dx, y: mountain.y + mountainArt.falls.dy };
 
-    // Water that cannot be walked through: the stream as a chain of short
-    // strips, each `reach` wide either side of its line, broken under the bridge.
+    // The stream, stretch by stretch: a smooth curve through its course, a
+    // point every pixel or so, each with its distance `s` downstream and how
+    // wide the water is either side of it.
+    const streams = STREAM_COURSES.map((list, index) => {
+      const course = (index === 0 ? [falls] : []).concat(list.map(([x, y]) => ({ x, y })));
+      const points = [];
+      for (let i = 0; i < course.length - 1; i++) {
+        const [p0, p1, p2, p3] = [course[Math.max(0, i - 1)], course[i], course[i + 1], course[Math.min(course.length - 1, i + 2)]];
+        const steps = Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y));
+        for (let k = 0; k < steps; k++) {
+          const u = k / steps;
+          const spline = (a, b, c, d) => 0.5 * (2 * b + (c - a) * u + (2 * a - 5 * b + 4 * c - d) * u * u + (3 * b - a - 3 * c + d) * u * u * u);
+          points.push({ x: spline(p0.x, p1.x, p2.x, p3.x), y: spline(p0.y, p1.y, p2.y, p3.y) });
+        }
+      }
+      points.push({ x: course[course.length - 1].x, y: course[course.length - 1].y });
+      points[0].s = 0;
+      for (let i = 1; i < points.length; i++) points[i].s = points[i - 1].s + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+      for (const point of points) point.half = STREAM_HALF[index](point.s);
+      const at = points.find((point) => point.s >= BRIDGES[index].along);
+      return { points, bridge: { x: at.x, y: at.y, s: at.s, length: BRIDGES[index].length, gap: BRIDGES[index].gap } };
+    });
+    const streamPoints = streams.flatMap((stretch) => stretch.points);
+    const nearStream = (x, y, pad) => streamPoints.some((point) => Math.hypot(x - point.x, y - point.y) < point.half + pad);
+
+    // Water that cannot be walked through: each stretch as a chain of short
+    // strips, each `reach` wide either side of its line, broken under its bridge.
     const banks = [];
-    for (let i = 0; i < points.length - 1; i += 3) {
-      const a = points[i];
-      const b = points[Math.min(points.length - 1, i + 3)];
-      if (Math.abs((a.s + b.s) / 2 - stream.bridge.s) < BRIDGE.gap / 2) continue;
-      banks.push({ a, b, reach: STREAM_HALF + 0.5 });
+    for (const { points, bridge } of streams) {
+      for (let i = 0; i < points.length - 1; i += 3) {
+        const a = points[i];
+        const b = points[Math.min(points.length - 1, i + 3)];
+        if (Math.abs((a.s + b.s) / 2 - bridge.s) < bridge.gap / 2) continue;
+        const reach = Math.max(a.half, b.half) + 0.5;
+        banks.push({ a, b, reach, left: Math.min(a.x, b.x) - reach, right: Math.max(a.x, b.x) + reach, top: Math.min(a.y, b.y) - reach, bottom: Math.max(a.y, b.y) + reach });
+      }
     }
     // The nearest point to (x, y) on a strip's line.
     const closestOn = (strip, x, y) => {
@@ -177,35 +207,27 @@ const Level = (() => {
       const along = Math.max(0, Math.min(1, ((x - strip.a.x) * dx + (y - strip.a.y) * dy) / (dx * dx + dy * dy || 1)));
       return { x: strip.a.x + dx * along, y: strip.a.y + dy * along };
     };
+    // Whether a circle can touch a strip at all: most of the park is nowhere near the stream.
+    const nearStrip = (strip, x, y, radius) => x + radius > strip.left && x - radius < strip.right && y + radius > strip.top && y - radius < strip.bottom;
     const inStream = (x, y, radius) => banks.some((strip) => {
+      if (!nearStrip(strip, x, y, radius)) return false;
       const near = closestOn(strip, x, y);
       return Math.hypot(x - near.x, y - near.y) < strip.reach + radius;
     });
 
-    // The hill: solid across its foot, an ellipse running back about 44 pixels from its front.
-    const hillArt = Scenery.props.hill;
-    const hillSprite = hillArt.frames[0];
-    const hill = { x: HILL_AT.x, y: HILL_AT.y, w: hillSprite.width, h: hillSprite.height };
-    const hillFoot = { x: HILL_AT.x, y: HILL_AT.y - 22, a: hillSprite.width / 2 - 4, b: 22 };
-    const onHill = (x, y, pad) => ((x - hillFoot.x) / (hillFoot.a + pad)) ** 2 + ((y - hillFoot.y) / (hillFoot.b + pad)) ** 2 < 1;
-    // Behind the hill (further up the screen, under its picture) a creature or acorn is out of sight.
-    const behindHill = (x, y) => Math.abs(x - hill.x) < hill.w / 2 && y < hill.y && y > hill.y - hill.h - 4;
     // In front of the waterfall nothing should stand between it and the player.
-    const fallsX = hill.x + hillArt.falls.dx;
-    const beforeFalls = (x, y, half) => Math.abs(x - fallsX) < half && y >= hill.y && y < hill.y + 28;
+    const beforeFalls = (x, y, half) => Math.abs(x - falls.x) < half && y >= mountain.y && y < mountain.y + 28;
     const inSmallPond = (x, y, pad) => ((x - smallPond.x) / (smallPond.a + pad)) ** 2 + ((y - smallPond.y) / (smallPond.b + pad)) ** 2 < 1;
-    const southFeature = (x, y, pad) => onHill(x, y, pad) || nearStream(x, y, pad) || inSmallPond(x, y, pad);
+    const southFeature = (x, y, pad) => onMountain(x, y, pad) || nearStream(x, y, pad) || inSmallPond(x, y, pad);
 
-    // Clear the ground for them: whatever stood there goes.
-    const reach = (prop) => (SOLID[prop.sprite] ? SOLID[prop.sprite][0] + 6 : prop.sprite === 'tuft' ? 2 : 6);
+    // Clear the ground for them: whatever stood there goes, and a tuft whose blades would reach the water.
+    const reach = (prop) => (SOLID[prop.sprite] ? SOLID[prop.sprite][0] + 6 : prop.sprite === 'tuft' ? 5 : 6);
     const removed = new Set(props.filter((prop) => southFeature(prop.x, prop.y, reach(prop))
-      || (Scenery.props[prop.sprite].hides && beforeFalls(prop.x, prop.y, Scenery.props[prop.sprite].frames[0].width / 2 + 4))
-      || (prop.sprite !== 'tuft' && behindHill(prop.x, prop.y) && prop.y > hill.y - 44)));
+      || (Scenery.props[prop.sprite].hides && beforeFalls(prop.x, prop.y, Scenery.props[prop.sprite].frames[0].width / 2 + 4))));
     props = props.filter((prop) => !removed.has(prop));
     solids = solids.filter((solid) => !removed.has(solid.owner));
-    props.push({ sprite: 'hill', x: hill.x, y: hill.y }, { sprite: 'falls', x: fallsX, y: hill.y + 2 });
-    for (let x = hillFoot.x - hillFoot.a + 10; x <= hillFoot.x + hillFoot.a - 10; x += 14) taken.push({ x, y: hillFoot.y, r: hillFoot.b + 8 });
-    for (const point of points.filter((each, index) => index % 6 === 0)) taken.push({ x: point.x, y: point.y, r: STREAM_HALF + 10 });
+    props.push({ sprite: 'mountain', x: mountain.x, y: mountain.y });
+    for (const point of streamPoints.filter((each, index) => index % 6 === 0)) taken.push({ x: point.x, y: point.y, r: point.half + 10 });
     taken.push({ x: smallPond.x, y: smallPond.y, r: smallPond.a + 12 });
 
     // Logs about the park, each solid along its length.
@@ -214,7 +236,7 @@ const Level = (() => {
       const x = Math.round(BORDER + 30 + southRandom() * (SIZE - 2 * BORDER - 60));
       const y = Math.round(BORDER + 40 + southRandom() * (SIZE - 2 * BORDER - 60));
       const sprite = LOGS[Math.floor(southRandom() * LOGS.length)];
-      if (!taken.every((other) => Math.hypot(x - other.x, y - other.y) >= 18 + other.r) || inAnyPond(x, y, 26) || behindHill(x, y)) continue;
+      if (!taken.every((other) => Math.hypot(x - other.x, y - other.y) >= 18 + other.r) || inAnyPond(x, y, 26) || onMountain(x, y, 22)) continue;
       taken.push({ x, y, r: 18 });
       props.push({ sprite, x, y });
       const half = Scenery.props[sprite].frames[0].width / 2 - 5;
@@ -236,6 +258,22 @@ const Level = (() => {
           creature.y = cy + (ny / (n || 0.01)) * b;
         }
       };
+      // Out of the mountain, square to its edge: a few steps the way its shape
+      // rises fastest, since its middle is too far off to push away from.
+      const outOfMountain = () => {
+        const shape = (x, y) => foot.shape(x - foot.x, y - foot.y, radius);
+        for (let step = 0; step < 4; step++) {
+          const inside = shape(creature.x, creature.y);
+          if (inside >= 1) return;
+          const gx = (shape(creature.x + 0.5, creature.y) - shape(creature.x - 0.5, creature.y));
+          const gy = (shape(creature.x, creature.y + 0.5) - shape(creature.x, creature.y - 0.5));
+          const slope = gx * gx + gy * gy;
+          if (slope < 1e-12) { creature.x -= radius; continue; }
+          const t = (1 - inside) / slope + 0.02 / Math.sqrt(slope);
+          creature.x += gx * t;
+          creature.y += gy * t;
+        }
+      };
       for (let pass = 0; pass < 2; pass++) {
         if (scenery) {
           for (const solid of solids) {
@@ -248,10 +286,11 @@ const Level = (() => {
               creature.y = solid.y + (dy / distance) * reach;
             }
           }
-          outOfEllipse(hillFoot.x, hillFoot.y, hillFoot.a + radius, hillFoot.b + radius);
+          outOfMountain();
         }
         // Off the stream's line, square to it.
         for (const strip of banks) {
+          if (!nearStrip(strip, creature.x, creature.y, radius)) continue;
           const near = closestOn(strip, creature.x, creature.y);
           const dx = creature.x - near.x;
           const dy = creature.y - near.y;
@@ -275,7 +314,7 @@ const Level = (() => {
     function blocked(x, y, radius) {
       return !inPark(x, y, radius) || inAnyPond(x, y, radius + 6)
         || solids.some((solid) => Math.hypot(x - solid.x, y - solid.y) < solid.r + radius)
-        || onHill(x, y, radius) || inStream(x, y, radius);
+        || onMountain(x, y, radius) || inStream(x, y, radius);
     }
 
     // ---- finding the way ----
@@ -287,7 +326,7 @@ const Level = (() => {
         const x = (col + 0.5) * CELL;
         const y = (row + 0.5) * CELL;
         const inside = x > BORDER + CLEARANCE && x < SIZE - BORDER - CLEARANCE && y > BORDER + 10 + CLEARANCE && y < SIZE - BORDER - CLEARANCE;
-        open[col + row * COLS] = inside && !onHill(x, y, CLEARANCE) && !inStream(x, y, CLEARANCE)
+        open[col + row * COLS] = inside && !onMountain(x, y, CLEARANCE) && !inStream(x, y, CLEARANCE)
           && !ponds.some((each) => ((x - each.x) / (each.a + CLEARANCE)) ** 2 + ((y - each.y - 5) / (each.b + CLEARANCE + 5)) ** 2 < 1) ? 1 : 0;
       }
     }
@@ -470,11 +509,10 @@ const Level = (() => {
     };
     const bushes = props.filter((prop) => prop.sprite.startsWith('bush'));
     const wasTucked = (acorn, list) => list.some((prop) => Math.hypot(prop.x - acorn.x, prop.y - acorn.y) < 15);
-    const moved = acorns.filter((acorn) => southFeature(acorn.x, acorn.y, 13) || behindHill(acorn.x, acorn.y)
-      || blocked(acorn.x, acorn.y, 3) || !canReach(acorn.x, acorn.y));
+    const moved = acorns.filter((acorn) => southFeature(acorn.x, acorn.y, 13) || blocked(acorn.x, acorn.y, 3) || !canReach(acorn.x, acorn.y));
     const kinds = moved.map((acorn) => (wasTucked(acorn, trees) ? 'tree' : wasTucked(acorn, bushes) ? 'bush' : 'open'));
     acorns = acorns.filter((acorn) => !moved.includes(acorn));
-    const fits = (x, y) => !southFeature(x, y, 13) && !behindHill(x, y) && !blocked(x, y, 6) && canReach(x, y);
+    const fits = (x, y) => !southFeature(x, y, 13) && !blocked(x, y, 6) && canReach(x, y);
     const standing = new Set(props);
     for (const kind of kinds) {
       let done = false;
@@ -495,7 +533,7 @@ const Level = (() => {
     }
 
     return {
-      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, stream, hill, logs, props, acorns, pushOut, blocked,
+      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, logs, props, acorns, pushOut, blocked,
       wayTo, nearestByWay, clearLine, distancesFrom, distanceTo,
       // For tests: the route grid, and which acorns had to move for the new features.
       grid: { cell: CELL, cols: COLS, open, isOpen: (x, y) => open[cellOf(x, y)] === 1 }, movedAcorns: moved.length,

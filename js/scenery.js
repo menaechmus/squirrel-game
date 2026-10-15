@@ -359,7 +359,7 @@ const Scenery = (() => {
     return c;
   }
 
-  // ---- logs and the rocky hill ----
+  // ---- logs and the mountain ----
 
   function flipped(sprite) {
     const c = canvas(sprite.width, sprite.height);
@@ -390,53 +390,202 @@ const Scenery = (() => {
     return c;
   }
 
-  // The rocky hill: a pile of craggy boulders, the tallest at the back, mossy
-  // on top, with a cleft between two in front where a spring comes down. The
-  // waterfall is a prop of its own ('falls'), drawn over the cleft.
-  const HILL = { w: 132, h: 92, fallsX: -18, fallsTop: 30 };
-  function rockyHill() {
-    const { w, h } = HILL;
-    const c = canvas(w, h);
-    const g = c.getContext('2d');
-    // Each boulder: left, top, width, height, rock, how much moss on top. Back row first.
-    const boulders = [
-      [38, 2, 52, 62, RAMPS.basalt, 0.3], [76, 16, 42, 50, RAMPS.granite, 0.32], [12, 22, 38, 46, RAMPS.granite, 0.3],
-      [96, 40, 34, 36, RAMPS.basalt, 0.34], [0, 46, 44, 38, RAMPS.basalt, 0.32],
-      [62, 50, 46, 34, RAMPS.granite, 0.3], [4, 62, 38, 30, RAMPS.granite, 0.22], [54, 60, 52, 32, RAMPS.basalt, 0.2], [100, 66, 32, 26, RAMPS.granite, 0.25],
-    ];
-    boulders.forEach(([left, top, bw, bh, ramp, moss], index) => {
-      const [piece] = rock({ seed: 401 + index, w: bw, h: bh, ramp, shape: boulder(bw, bh), facets: 6 + (bw >> 3), speckle: 0.06, moss, cracks: bw > 40 ? 2 : 1 });
-      g.drawImage(piece, left, top);
-    });
-    // The cleft, in deep shade, from the spring down to the foot of the hill.
-    const middle = (w >> 1) + HILL.fallsX;
-    const pixels = g.getImageData(0, 0, w, h).data;
-    for (let y = HILL.fallsTop - 2; y < h; y++) {
-      if (!pixels[(middle + y * w) * 4 + 3]) continue;
-      g.fillStyle = OUTLINE.stone;
-      g.fillRect(middle - 4, y, 9, 1);
-      g.fillStyle = RAMPS.basalt[4];
-      g.fillRect(middle - 3, y, 7, 1);
-    }
-    return [c];
+  // The mountain at the east edge of the park: one mass of rock whose middle is
+  // on the edge, so that half of it runs on beyond the park. It rises from the
+  // park towards the edge in a rounded slope broken into crags, and stands on a
+  // flat foot. Seen from in front and above: a mossy top, then a cliff face in
+  // uneven layers of rock, with buttresses, ledges and cracks, and fallen rocks
+  // at its foot. A creek comes across the top from beyond the edge and drops
+  // down a dark, wet channel in the face, churning white where it lands. Four
+  // frames, for the running water.
+  const MOUNTAIN = { w: 190, h: 128, mx: 160, my: 62, a: 160, bTop: 64, bBottom: 64, powerTop: 1.6, powerBottom: 3.2, fallsX: 62 };
+  // The mountain's shape on the ground, which the park shares: under 1 inside
+  // it, for a spot (dx, dy) from its middle, with the shape `pad` pixels bigger
+  // all round. It slopes up above its middle and is squarer below, so its foot
+  // is flat but for the rounded west end.
+  function mountainShape(dx, dy, pad = 0) {
+    const up = dy < 0;
+    const power = up ? MOUNTAIN.powerTop : MOUNTAIN.powerBottom;
+    return Math.abs(dx / (MOUNTAIN.a + pad)) ** power + Math.abs(dy / ((up ? MOUNTAIN.bTop : MOUNTAIN.bBottom) + pad)) ** power;
   }
 
-  // The waterfall down the cleft, in four frames: streaks of light running
-  // down, foam where it lands.
-  function waterfall() {
-    const w = 7;
-    const h = HILL.h - HILL.fallsTop + 3;
+  function mountain() {
+    const { w, h, mx, my, fallsX } = MOUNTAIN;
+    const rand = seededRandom(404);
+    // Each column's first and last row of rock: the shape, its skyline broken into crags.
+    const top = new Int16Array(w).fill(-1);
+    const bottom = new Int16Array(w).fill(-1);
+    for (let x = 0; x < w; x++) {
+      let first = -1;
+      for (let y = 0; y < h; y++) {
+        if (mountainShape(x + 0.5 - mx, y + 0.5 - my) >= 1) continue;
+        if (first < 0) first = y;
+        bottom[x] = y;
+      }
+      const crag = smoothNoise(x, 0, 12, 41) * 12 + smoothNoise(x, 0, 4, 42) * 4 - 8;
+      if (first >= 0) top[x] = Math.max(0, Math.min(bottom[x] - 20, Math.round(first + crag)));
+    }
+    const inside = (x, y) => x >= 0 && x < w && top[x] >= 0 && y >= top[x] && y <= bottom[x];
+    // Where the mossy top gives way to the cliff face, column by column: the top
+    // is deeper towards the edge of the park, where the mountain is higher.
+    const lips = new Float32Array(w);
+    for (let x = 0; x < w; x++) lips[x] = Math.min(bottom[x] - 14, top[x] + 14 + (x / w) * 10 + smoothNoise(x, 1, 8, 43) * 6);
+    const lip = (x) => lips[Math.max(0, Math.min(w - 1, x))];
+    // The face: layers of rock that wander out of level, each a slightly
+    // different shade; broad buttresses standing out of it, gullies between;
+    // all of it chipped into flat faces like the rocks about the park.
+    const layerAt = (x, y) => (y - lip(x) + x * 0.07 + smoothNoise(x, y, 16, 44) * 7) / (9 + smoothNoise(x, 2, 23, 45) * 5);
+    const buttress = (x) => smoothNoise(x, 3, 13, 46);
+    // The flat faces: one somewhere in each 12 x 16 cell, so each pixel need only
+    // look for the nearest in the cells round its own. Measured squashed upright,
+    // so the faces come out taller than wide.
+    const FACET_W = 12;
+    const FACET_H = 16;
+    const facetCols = Math.ceil((w + 2) / FACET_W);
+    const facetRows = Math.ceil((h + 2) / FACET_H);
+    const facets = [];
+    for (let row = 0; row < facetRows; row++) {
+      for (let col = 0; col < facetCols; col++) facets.push({ x: (col + rand()) * FACET_W - 1, y: (row + rand()) * FACET_H - 1, shift: (rand() - 0.5) * 0.26 });
+    }
+    // Which face each pixel is on, worked out once.
+    const facetOf = new Int16Array((w + 2) * (h + 2));
+    for (let y = -1; y <= h; y++) {
+      for (let x = -1; x <= w; x++) {
+        const col = Math.floor((x + 1) / FACET_W);
+        const row = Math.floor((y + 1) / FACET_H);
+        let best = 0;
+        let bestDistance = Infinity;
+        for (let r = Math.max(0, row - 1); r <= Math.min(facetRows - 1, row + 1); r++) {
+          for (let c = Math.max(0, col - 1); c <= Math.min(facetCols - 1, col + 1); c++) {
+            const i = c + r * facetCols;
+            const distance = (x - facets[i].x) ** 2 * 1.8 + (y - facets[i].y) ** 2;
+            if (distance < bestDistance) { best = i; bestDistance = distance; }
+          }
+        }
+        facetOf[x + 1 + (y + 1) * (w + 2)] = best;
+      }
+    }
+    const facetAt = (x, y) => facetOf[x + 1 + (y + 1) * (w + 2)];
+    // Cracks running down the face.
+    const cracks = [9, 30, 96, 121, 139, 168].map((x0) => {
+      const path = [];
+      let x = x0;
+      const length = 14 + rand() * 36;
+      for (let y = 0; y < length; y++) { path.push(Math.round(x)); x += (rand() - 0.5) * 1.3; }
+      return { from: Math.round(lip(x0) + 4 + rand() * 20), path };
+    });
+    const onCrack = (x, y) => cracks.some((crack) => y >= crack.from && y - crack.from < crack.path.length && crack.path[y - crack.from] === x);
+    const channel = (x, y) => Math.abs(x + 0.5 - fallsX) < 7 && y >= lip(fallsX) - 2;
+
+    const still = pixelCanvas(w, h, (x, y) => {
+      if (!inside(x, y)) return null;
+      const edge = !inside(x - 1, y) || !inside(x, y - 1) || !inside(x, y + 1) || (!inside(x + 1, y) && x < w - 1);
+      if (edge) return OUTLINE.stone;
+      const lipY = lip(x);
+      if (y < lipY) {
+        // The top: moss and grass, with bare rock and dark shrubs here and there.
+        if (y >= lipY - 1) return smoothNoise(x, 0, 5, 58) > 0.35 ? RAMPS.granite[0] : RAMPS.granite[2];   // the lit rim of the cliff
+        const patch = smoothNoise(x, y, 6, 47);
+        if (patch > 0.7) return tone(RAMPS.granite, 0.2 + (patch - 0.7) * 2.4 + hash(x, y, 48) * 0.15, x, y);
+        if (smoothNoise(x, y, 3, 49) > 0.78) return hash(x, y, 50) < 0.4 ? RAMPS.leaf[4] : RAMPS.leaf[3];
+        return tone(RAMPS.moss, 0.1 + ((y - top[x]) / (lipY - top[x])) * 0.35 + smoothNoise(x, y, 3, 51) * 0.35, x, y);
+      }
+      if (channel(x, y)) {
+        // Wet rock behind the waterfall, dark with a sheen.
+        return hash(x, y, 52) > 0.9 ? RAMPS.basalt[2] : (x + y) % 3 ? RAMPS.basalt[4] : OUTLINE.stone;
+      }
+      if (onCrack(x, y)) return RAMPS.basalt[4];
+      const layer = layerAt(x, y);
+      const index = Math.floor(layer);
+      const within = layer - index;
+      // Ledges run only part of the way along each layer.
+      const ledge = smoothNoise(x, index * 7, 9, 53) > 0.45;
+      if (ledge && within > 0.86) return y < lipY + 3 ? RAMPS.basalt[4] : RAMPS.basalt[3];     // shadow under a ledge
+      if (ledge && within < 0.12) {
+        // The top of a ledge: lit, with moss and grass in places.
+        return smoothNoise(x, y, 5, 54) > 0.58 ? tone(RAMPS.moss, 0.2 + hash(x, y, 55) * 0.4, x, y) : RAMPS.granite[1];
+      }
+      const facet = facetAt(x, y);
+      let shade = 0.3 + (index % 3) * 0.07 + facets[facet].shift + (0.5 - buttress(x)) * 0.55 + (x / w) * 0.14;
+      if (facetAt(x + 1, y + 1) !== facet) shade += 0.17;          // crease between two faces
+      else if (facetAt(x - 1, y - 1) !== facet) shade -= 0.12;     // and its lit edge
+      if (y < lipY + 3) shade += 0.25;                              // in the shade of the brink
+      shade += Math.max(0, y - bottom[x] + 9) * 0.035;              // darker towards the foot
+      if (hash(x, y, 56) < 0.05) shade += hash(x, y, 57) < 0.5 ? -0.2 : 0.2;
+      return tone(RAMPS.granite, shade, x, y);
+    });
+
+    // Fallen rocks along the foot, clear of the pool under the waterfall.
+    const g = still.getContext('2d');
+    const rocks = [[4, 13, 10, RAMPS.granite], [19, 18, 11, RAMPS.basalt], [36, 12, 8, RAMPS.granite], [86, 17, 10, RAMPS.basalt],
+      [103, 11, 8, RAMPS.granite], [129, 19, 11, RAMPS.granite], [150, 13, 8, RAMPS.basalt], [170, 17, 10, RAMPS.granite]];
+    rocks.forEach(([left, rw, rh, ramp], index) => {
+      const [piece] = rock({ seed: 420 + index, w: rw, h: rh, ramp, shape: boulder(rw, rh), facets: 4, speckle: 0.06, moss: index % 3 === 0 ? 0.3 : 0 });
+      const foot = bottom[Math.min(w - 1, left + (rw >> 1))];
+      g.drawImage(piece, left, Math.min(h - rh, foot + 3 - rh));
+    });
+
+    // The creek across the top, from beyond the edge to the brink of the waterfall,
+    // keeping to the top as it winds.
+    const creekPoints = [];
+    for (let x = w + 1; x >= fallsX; x--) {
+      const column = Math.min(w - 1, x);
+      const share = 0.4 + 0.5 * (1 - (x - fallsX) / (w + 1 - fallsX)) + Math.sin(x * 0.09) * 0.12;
+      creekPoints.push({ x, y: top[column] + (lip(column) - top[column]) * Math.min(0.95, share), s: w + 1 - x });
+    }
+    const lipAtFalls = Math.round(lip(fallsX));
+    const bottomAtFalls = bottom[fallsX];
     const frames = [];
     for (let f = 0; f < 4; f++) {
-      frames.push(pixelCanvas(w, h, (x, y) => {
-        if (x === 0 || x === w - 1) return y > 1 && y < h - 3 ? '#3a7ec6' : null;
-        if (y >= h - 4) return (x + y + f) % 3 === 0 ? '#86c2f2' : '#ffffff';   // foam
-        const streak = (y - f * 4 + x * 5) % 9;
-        if (streak < 3) return '#d4eeff';
-        return x === 1 || x === w - 2 ? '#4a90d9' : '#62a6e6';
-      }));
+      const frame = canvas(w, h);
+      const fg = frame.getContext('2d');
+      fg.drawImage(still, 0, 0);
+      const dot = (x, y, color) => { fg.fillStyle = color; fg.fillRect(Math.round(x), Math.round(y), 1, 1); };
+      // The creek: dark banks, water, glints running towards the waterfall.
+      for (const point of creekPoints) {
+        for (let dy = -2; dy <= 2; dy++) {
+          const x = Math.round(point.x);
+          const y = Math.round(point.y) + dy;
+          if (!inside(x, y) || y >= lip(x) - 1) continue;
+          if (Math.abs(dy) === 2) dot(x, y, RAMPS.moss[4]);
+          else dot(x, y, (point.s + f * 3 + (dy + 1) * 5) % 13 < 2 ? '#d4eeff' : dy === 0 ? '#4a90d9' : '#3a7ec6');
+        }
+      }
+      // The waterfall: a little wider as it falls, streaks of light running down,
+      // each strand of water at its own pace.
+      for (let y = lipAtFalls - 1; y <= bottomAtFalls; y++) {
+        const drop = (y - lipAtFalls) / (bottomAtFalls - lipAtFalls);
+        const half = 4.5 + Math.max(0, drop) * 1.6 + Math.sin(y * 0.6) * 0.3;
+        for (let x = Math.floor(fallsX - half); x <= Math.ceil(fallsX + half); x++) {
+          const across = Math.abs(x + 0.5 - fallsX) / half;
+          if (across > 1) continue;
+          const strand = Math.floor(hash(x, 0, 64) * 16);
+          const streak = (y - f * 4 + strand + 64) % 16;
+          const light = streak < (across < 0.5 ? 5 : 3);
+          dot(x, y, across > 0.82 ? (light ? '#4a90d9' : '#3a7ec6') : light ? '#d4eeff' : across > 0.55 ? '#4a90d9' : '#62a6e6');
+        }
+      }
+      // White water where it lands: a churning mound about 25 pixels across,
+      // thinning out towards its edge, and spray above it.
+      const foamY = bottomAtFalls - 1;
+      for (let y = foamY - 9; y <= h - 1; y++) {
+        for (let x = fallsX - 14; x <= fallsX + 14; x++) {
+          const n = ((x + 0.5 - fallsX) / 12.5) ** 2 + ((y + 0.5 - foamY) / (y < foamY ? 9 : 4)) ** 2;
+          if (n >= 1) continue;
+          const churn = hash(x, y, 60 + f);
+          if (churn < n * 0.85) continue;
+          dot(x, y, churn > 0.8 ? '#ffffff' : churn > 0.5 ? '#d4eeff' : '#86c2f2');
+        }
+      }
+      for (let i = 0; i < 14; i++) {
+        const x = fallsX + (hash(i, f, 61) - 0.5) * 30;
+        const y = bottomAtFalls - 4 - hash(i, f, 62) * 14;
+        if (inside(Math.round(x), Math.round(y))) dot(x, y, hash(i, f, 63) > 0.5 ? '#ffffff' : '#d4eeff');
+      }
+      frames.push(frame);
     }
-    return frames;
+    // Where the water lands, relative to the middle of the picture's base.
+    return { frames, falls: { dx: fallsX - (w >> 1), dy: bottomAtFalls + 1 - h } };
   }
 
   // ---- the catalogue ----
@@ -513,9 +662,14 @@ const Scenery = (() => {
   define('logLongL', [flipped(logLong)], { shadow: [34, 6] });
   define('logShort', [logShort], { shadow: [24, 6] });
   define('logShortL', [flipped(logShort)], { shadow: [24, 6] });
-  // The hill hides what is behind it, as a tree top does; its waterfall runs on the clock, not the wind.
-  define('hill', rockyHill(), { hides: true, shadow: [140, 22], falls: { dx: HILL.fallsX, top: HILL.fallsTop } });
-  define('falls', waterfall(), { flows: true });
+  // The mountain's water runs on the clock, not the wind. `foot` is its shape on
+  // the ground (its middle relative to the middle of the picture's base), and
+  // `falls` where the waterfall lands.
+  const peak = mountain();
+  define('mountain', peak.frames, {
+    hides: true, flows: true, shadow: [196, 26], falls: peak.falls,
+    foot: { dx: MOUNTAIN.mx - (MOUNTAIN.w >> 1), dy: MOUNTAIN.my - MOUNTAIN.h, shape: mountainShape },
+  });
 
   // Which frame of a prop shows for a given wind strength.
   function frameIndex(art, lean) {
@@ -637,48 +791,126 @@ const Scenery = (() => {
     return { x: left, y: top, frames };
   }
 
-  // The stream from the hill's waterfall to the second pond, and that pond,
-  // as one picture in four frames, with the log bridge laid across the stream.
-  // Glints run downstream; foam where the waterfall lands.
+  // The stream from the foot of the waterfall into the second pond and on out
+  // of the park, and that pond, as one picture in four frames, with a log
+  // bridge laid across each stretch. The water is deeper in the middle; its
+  // banks are damp earth and pebbles; glints drift downstream, ripples break
+  // round a few stones, and the pool under the waterfall churns. Where the
+  // stream leaves the park it runs through a gap in the hedge.
+  const STREAM_STONES = [[0, 38, 0.35], [0, 112, -0.4], [0, 164, 0.3], [1, 64, -0.35], [1, 94, 0.3]];   // stretch, how far down, how far across
   function buildBrook(level) {
-    const { points, half, bridge } = level.stream;
     const pond = level.ponds[1];
     const water = pondWater(pond, seededRandom(56));
-    const pad = 10;
+    const rand = seededRandom(57);
+    const inner = level.size - level.border;
+    // Every point of both stretches, each knowing its stretch and which way is across it.
+    const points = [];
+    level.streams.forEach(({ points: line }, stretch) => {
+      line.forEach((point, i) => {
+        const ahead = line[Math.min(line.length - 1, i + 2)];
+        const behind = line[Math.max(0, i - 2)];
+        const length = Math.hypot(ahead.x - behind.x, ahead.y - behind.y) || 1;
+        points.push({ x: point.x, y: point.y, s: point.s, half: point.half, stretch, nx: -(ahead.y - behind.y) / length, ny: (ahead.x - behind.x) / length });
+      });
+    });
+    const pad = 14;
     const xs = points.map((point) => point.x).concat(pond.x - pond.a, pond.x + pond.a);
     const ys = points.map((point) => point.y).concat(pond.y - pond.b, pond.y + pond.b);
     const left = Math.floor(Math.min(...xs) - pad);
     const top = Math.floor(Math.min(...ys) - pad);
     const w = Math.ceil(Math.max(...xs) + pad) - left;
-    const h = Math.ceil(Math.max(...ys) + pad) - top;
-    // Nearest point of the stream's course to each pixel, worked out once.
+    const h = Math.min(level.size, Math.ceil(Math.max(...ys) + pad)) - top;
+    // Nearest point of the stream's line to each pixel, worked out once.
     const nearest = new Int16Array(w * h).fill(-1);
     const away = new Float32Array(w * h).fill(Infinity);
     points.forEach((point, index) => {
-      for (let y = Math.max(0, Math.floor(point.y - half - 3 - top)); y <= Math.min(h - 1, Math.ceil(point.y + half + 3 - top)); y++) {
-        for (let x = Math.max(0, Math.floor(point.x - half - 3 - left)); x <= Math.min(w - 1, Math.ceil(point.x + half + 3 - left)); x++) {
+      const reach = point.half + 4;
+      for (let y = Math.max(0, Math.floor(point.y - reach - top)); y <= Math.min(h - 1, Math.ceil(point.y + reach - top)); y++) {
+        for (let x = Math.max(0, Math.floor(point.x - reach - left)); x <= Math.min(w - 1, Math.ceil(point.x + reach - left)); x++) {
           const d = Math.hypot(x + left + 0.5 - point.x, y + top + 0.5 - point.y);
           if (d < away[x + y * w]) { away[x + y * w] = d; nearest[x + y * w] = index; }
         }
       }
     });
-    const log = fallenLog(bridge.length, 503, false);
+    // A spot `across` (-1 to 1 of the half-width) from the line, `s` down a stretch, as a pixel of this picture.
+    const spotAt = (stretch, s, across) => {
+      const point = points.find((each) => each.stretch === stretch && each.s >= s) || points[points.length - 1];
+      return { x: Math.round(point.x + point.nx * point.half * across) - left, y: Math.round(point.y + point.ny * point.half * across) - top, point };
+    };
+    // Glints: each drifts three pixels downstream a frame for three frames, then starts again.
+    const lit = [new Set(), new Set(), new Set(), new Set()];
+    level.streams.forEach(({ points: line }, stretch) => {
+      for (let s = 4; s < line[line.length - 1].s - 6; s += 5 + rand() * 6) {
+        const across = (rand() - 0.5) * 1.1;
+        const phase = Math.floor(rand() * 4);
+        for (let f = 0; f < 4; f++) {
+          const step = (f + phase) % 4;
+          if (step === 3) continue;
+          const spot = spotAt(stretch, s + step * 3, across);
+          lit[f].add(spot.x + spot.y * w);
+          // Some are two pixels long, the second one downstream (along the stream is (ny, -nx)).
+          if (rand() < 0.5) lit[f].add(Math.round(spot.x + spot.point.ny) + Math.round(spot.y - spot.point.nx) * w);
+        }
+      }
+    });
+    // The part of the picture the pond can reach; everywhere else only the stream need be looked at.
+    const pondBox = { left: pond.x - pond.a * 1.1 - 1 - left, right: pond.x + pond.a * 1.1 + 1 - left, top: pond.y - pond.b * 1.1 - 1 - top, bottom: pond.y + pond.b * 1.1 + 1 - top };
+    const stones = STREAM_STONES.map(([stretch, s, across]) => spotAt(stretch, s, across));
+    const stoneAt = (x, y) => stones.find((stone) => (x - stone.x) ** 2 + ((y - stone.y) * 1.3) ** 2 <= 3);
+    // Ripples: the water just below a stone, broken white, changing every frame.
+    const rippleAt = (x, y, f) => stones.some((stone) => {
+      const dx = x - stone.x;
+      const dy = y - stone.y;
+      const down = dx * stone.point.ny - dy * stone.point.nx;    // how far downstream of the stone
+      const side = dx * stone.point.nx + dy * stone.point.ny;
+      return down > 1 && down < 5 && Math.abs(side) < 2.6 - down * 0.3 && hash(x, y, 80 + f) > 0.45;
+    });
+
+    const log = fallenLog(level.streams[0].bridge.length, 503, false);
     const frames = [];
     for (let f = 0; f < 4; f++) {
       const frame = pixelCanvas(w, h, (x, y) => {
-        const inPond = water(x + left, y + top, f);
-        if (inPond && inPond !== '#3a7a32') return inPond;
+        const px = x + left;
+        const py = y + top;
+        const nearPond = x >= pondBox.left && x <= pondBox.right && y >= pondBox.top && y <= pondBox.bottom;
         const d = away[x + y * w];
-        if (d >= half + 1.2) return inPond;
-        if (d >= half) return '#3a7a32';
-        const s = points[nearest[x + y * w]].s;
-        if (s < 7) return (x + y + f) % 3 === 0 ? '#d4eeff' : '#ffffff';   // foam below the waterfall
-        // Glints, two pixels long, running downstream three pixels a frame.
-        if (d < half - 1 && (s - f * 3 + (x % 3) * 7) % 11 < 2) return '#b6dcff';
-        return d < half - 1.5 ? '#3a7ec6' : '#4a90d9';
+        const point = points[nearest[x + y * w]];
+        if (!nearPond && (!point || d >= point.half + 2.6)) return null;
+        const inPond = nearPond ? water(px, py, f) : null;
+        if (inPond && inPond !== '#3a7a32') return inPond;
+        if (!point || d >= point.half + 2.6) return inPond;
+        const throughHedge = py >= inner;
+        if (d >= point.half + 1.4) {
+          // The hedge's cut edge where the stream runs through it; on the lawn, damp grass.
+          if (throughHedge) return OUTLINE.leaf;
+          return hash(px, py, 81) < 0.6 ? '#3a7a32' : inPond;
+        }
+        if (d >= point.half) {
+          // The bank: damp earth, with pebbles.
+          const pebble = hash(px, py, 82);
+          if (pebble > 0.86) return pebble > 0.95 ? RAMPS.granite[1] : RAMPS.granite[2];
+          return throughHedge ? '#3e3020' : pebble < 0.4 ? '#6b5536' : '#5a4630';
+        }
+        if (stoneAt(x, y)) return (x + y) % 2 ? RAMPS.granite[2] : RAMPS.granite[1];
+        // The pool under the waterfall churns white where the water lands, with
+        // flecks of foam drifting on across it.
+        if (point.stretch === 0 && point.s < 26) {
+          const churn = hash(px, py, 83 + f);
+          if (churn < 0.8 * Math.max(0, 1 - point.s / 13) ** 1.2 + 0.08) return churn < 0.25 ? '#ffffff' : '#d4eeff';
+        }
+        if (rippleAt(x, y, f)) return '#d4eeff';
+        if (lit[f].has(x + y * w)) return '#b6dcff';
+        const depth = d / point.half;
+        const checker = (px + py) % 2 === 0;
+        if (throughHedge) return depth < 0.6 ? '#2f6aa8' : '#3a7ec6';   // in the hedge's shade
+        if (depth < 0.42 || (depth < 0.5 && checker)) return '#3a7ec6';
+        if (depth < 0.78 || (depth < 0.86 && checker)) return '#4a90d9';
+        return '#62a6e6';
       });
-      // Two logs side by side make the bridge.
-      for (const dy of [-12, -3]) frame.getContext('2d').drawImage(log, Math.round(bridge.x - left - bridge.length / 2), Math.round(bridge.y - top + dy));
+      // Two logs side by side make each bridge.
+      for (const { bridge } of level.streams) {
+        for (const dy of [-12, -3]) frame.getContext('2d').drawImage(log, Math.round(bridge.x - left - bridge.length / 2), Math.round(bridge.y - top + dy));
+      }
       frames.push(frame);
     }
     return { x: left, y: top, frames };

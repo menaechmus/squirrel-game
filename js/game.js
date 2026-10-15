@@ -32,7 +32,7 @@
   const level = Level.generate();
   const ground = Scenery.buildGround(level);
   const pond = Scenery.buildPond(level);
-  const brook = Scenery.buildBrook(level);   // the stream, the second pond and the log bridge
+  const brook = Scenery.buildBrook(level);   // the stream, the second pond and the log bridges
   const miniature = Hud.buildMinimap(level);
   const effects = Effects.create(level);
   const total = level.acorns.length;
@@ -268,7 +268,7 @@
 
   // The test squirrel heads for the nearest acorn as the crow flies. When
   // something is in that straight line it takes the way round, as a person
-  // would: round the ponds and the hill, over the bridge.
+  // would: round the ponds and the mountain, over a bridge.
   function autoVector(dt) {
     const nearest = nearestAcorn();
     if (!nearest) return { x: 0, y: 0 };

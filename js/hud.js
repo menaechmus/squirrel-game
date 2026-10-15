@@ -9,14 +9,14 @@ const Hud = (() => {
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
   // A miniature of the park: hedge, grass, the ponds and the stream with its
-  // bridge, the rocky hill, and tree tops.
+  // bridges, the mountain at the east edge, and tree tops.
   function buildMinimap(level) {
     const c = Sprites.canvas(MINIMAP_SIZE, MINIMAP_SIZE);
     const g = c.getContext('2d');
     const cell = level.size / MINIMAP_SIZE;
     const ponds = level.ponds || [level.pond];
-    const stream = level.stream;
-    const hill = level.hill;
+    const streams = level.streams || [];
+    const foot = level.mountain && level.mountain.foot;
     const treeCells = new Set();
     for (const prop of level.props) {
       const art = Scenery.props[prop.sprite];
@@ -24,21 +24,23 @@ const Hud = (() => {
       if (art.hides && art.tops) treeCells.add(Math.floor(prop.x / cell) + Math.floor((prop.y - art.frames[0].height / 2) / cell) * MINIMAP_SIZE);
     }
     const inWater = (x, y) => ponds.some((pond) => ((x - pond.x) / pond.a) ** 2 + ((y - pond.y) / pond.b) ** 2 < 1)
-      || (stream && stream.points.some((point) => Math.hypot(x - point.x, y - point.y) < cell / 2));
-    const onBridge = (x, y) => stream && Math.abs(x - stream.bridge.x) < cell / 2 && Math.abs(y - stream.bridge.y) < cell / 2;
-    const onHill = (x, y) => hill && ((x - hill.x) / (hill.w / 2 - 4)) ** 2 + ((y - (hill.y - hill.h / 2)) / (hill.h / 2 - 4)) ** 2 < 1;
+      || streams.some((stretch) => stretch.points.some((point) => Math.hypot(x - point.x, y - point.y) < Math.max(cell / 2, point.half)));
+    const onBridge = (x, y) => streams.some(({ bridge }) => Math.abs(x - bridge.x) < cell / 2 && Math.abs(y - bridge.y) < cell / 2);
+    const onMountain = (x, y) => foot && foot.shape(x - foot.x, y - foot.y) < 1;
+    const inHedge = (x, y) => x < level.border || y < level.border || x > level.size - level.border || y > level.size - level.border;
     for (let my = 0; my < MINIMAP_SIZE; my++) {
       for (let mx = 0; mx < MINIMAP_SIZE; mx++) {
         const x = (mx + 0.5) * cell;
         const y = (my + 0.5) * cell;
-        if (x < level.border || y < level.border || x > level.size - level.border || y > level.size - level.border) {
-          g.fillStyle = '#1f5226';
+        // The mountain stands over the hedge, and the stream runs out through it.
+        if (onMountain(x, y)) {
+          g.fillStyle = '#8a8a96';
         } else if (onBridge(x, y)) {
           g.fillStyle = '#8f5a34';
         } else if (inWater(x, y)) {
           g.fillStyle = '#4a90d9';
-        } else if (onHill(x, y)) {
-          g.fillStyle = '#8a8a96';
+        } else if (inHedge(x, y)) {
+          g.fillStyle = '#1f5226';
         } else {
           g.fillStyle = treeCells.has(mx + my * MINIMAP_SIZE) ? '#2d7a37' : '#5cab46';
         }
