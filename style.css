@@ -89,6 +89,18 @@ body {
   fill: currentColor;
 }
 
+/* The golden acorn under the minimap once it is found (the top bar has no room
+   to spare on a narrow phone): 2 screen pixels to each of its pixels, like the
+   speaker, with the same shadow as the text. */
+#golden img {
+  display: block;
+  width: 16px;
+  height: 20px;
+  filter: drop-shadow(2px 2px 0 #000);
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
 #mute.off .waves,
 #mute-menu.off .waves,
 #mute:not(.off) .cross,

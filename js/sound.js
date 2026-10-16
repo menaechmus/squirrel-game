@@ -1,7 +1,8 @@
 // Sound: the game's beeps, and the park's own quiet sounds round the squirrel:
 // water babbling and bubbling, the rush of the waterfall, leaves in a gust,
-// jays singing and groundhogs scratching at the dirt. Everything is made in
-// code with the Web Audio API; nothing is loaded.
+// jays singing, groundhogs scratching at the dirt, the cabin's fire crackling
+// and its door creaking. Everything is made in code with the Web Audio API;
+// nothing is loaded.
 
 const Sound = (() => {
   // Each beep is a few square-wave notes: [frequency, delay, length]. The
@@ -15,6 +16,7 @@ const Sound = (() => {
     rumble: [[110, 0, 0.12], [95, 0.1, 0.12]],
     pop: [[300, 0, 0.05], [450, 0.04, 0.06]],
     finish: [[523, 0, 0.25], [659, 0.12, 0.25], [784, 0.24, 0.25], [1047, 0.36, 0.25]],
+    golden: [[1319, 0, 0.07], [1568, 0.06, 0.07], [2093, 0.12, 0.08], [2637, 0.2, 0.22]],   // the golden acorn
   };
   const BEEP_LEVEL = 0.05;
   // How far each background sound carries (game pixels), and how loud it is at
@@ -26,6 +28,11 @@ const Sound = (() => {
   const CALL = { near: 16, reach: 170 };
   const SONG = { level: 0.035, every: [3, 8] };   // seconds between songs from a sitting jay
   const SCRATCH = { level: 0.1, every: [0.35, 0.6] };
+  // The cabin's fire: a soft hiss, about as loud as the water beside it, and
+  // crackles, more often the nearer the squirrel is. The door's creak, under a
+  // third of a beep.
+  const FIRE = { near: 14, reach: 120, level: 0.06, crackle: 0.09, cracklesPerSecond: 7 };
+  const CREAK = { level: 0.12 };
   const FADE = 0.03;                               // switching on or off takes about three times this
 
   // 1 within `near`, falling to 0 at `reach`, and faster further out.
@@ -88,14 +95,16 @@ const Sound = (() => {
       };
       const waterSide = panner(master);
       const fallsSide = panner(master);
+      const fireSide = panner(master);
       parts = {
-        master, noise, waterSide, fallsSide,
+        master, noise, waterSide, fallsSide, fireSide,
         // Babbling water: two bands of noise, each rising and falling on its own.
         babble: [layer([['bandpass', 750, 0.9]], waterSide.node), layer([['bandpass', 1900, 1.6]], waterSide.node)],
         falls: layer([['highpass', 220, 0.7], ['lowpass', 1500, 0.7]], fallsSide.node),
         rustle: layer([['highpass', 1600, 0.7], ['bandpass', 4200, 0.6]], master),
-        targets: { water: 0, water2: 0, falls: 0, rustle: 0, waterSide: 0, fallsSide: 0 },
-        nextSwell: [0, 0],
+        fire: layer([['lowpass', 520, 0.6]], fireSide.node),
+        targets: { water: 0, water2: 0, falls: 0, rustle: 0, waterSide: 0, fallsSide: 0, fire: 0, fireSide: 0 },
+        nextSwell: [0, 0, 0],
       };
     }
 
@@ -197,6 +206,49 @@ const Sound = (() => {
       }
     }
 
+    // A crackle in the fire: a sharp click of noise, and now and then a
+    // deeper pop.
+    function crackle(start, volume, side) {
+      const pop = random() < 0.2;
+      const length = pop ? 0.02 + random() * 0.02 : 0.004 + random() * 0.008;
+      const source = context.createBufferSource();
+      source.buffer = parts.noise;
+      const filter = context.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = pop ? 600 : 2200 + random() * 2200;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(FIRE.crackle * volume * (pop ? 1 : 0.35 + random() * 0.65), start + 0.001);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+      source.connect(filter).connect(gain).connect(panned(side));
+      source.start(start, random() * 1.9, length + 0.01);
+    }
+
+    // The cabin's door swinging open: a short creak, a stutter of little clicks
+    // through a wooden ring, rising then falling in pitch.
+    function creak(volume = 1, now = context ? context.currentTime : 0) {
+      if (!parts || !on) return;
+      const start = now + 0.02;
+      const length = 0.42;
+      const oscillator = context.createOscillator();
+      oscillator.type = 'sawtooth';
+      oscillator.frequency.setValueAtTime(38, start);
+      oscillator.frequency.linearRampToValueAtTime(64, start + length * 0.45);
+      oscillator.frequency.linearRampToValueAtTime(46, start + length);
+      const filter = context.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 1250;
+      filter.Q.value = 4;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(CREAK.level * volume, start + 0.06);
+      gain.gain.setValueAtTime(CREAK.level * volume, start + length * 0.6);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+      oscillator.connect(filter).connect(gain).connect(parts.master);
+      oscillator.start(start);
+      oscillator.stop(start + length + 0.02);
+    }
+
     // A bubble rising in the water: a soft blip that slides up.
     function bubble(start, volume, side) {
       const length = 0.04 + random() * 0.04;
@@ -227,7 +279,8 @@ const Sound = (() => {
     // { distance, dx } to the nearest water and to the foot of the waterfall;
     // `scene.breeze` (0 to 1) how hard the leaves round it are moving; and
     // `scene.voices` the animals up to something: { who, kind, x, y }, kind
-    // being 'sitting', 'landing' or 'flying' (jays) or 'digging' (groundhogs).
+    // being 'sitting', 'landing' or 'flying' (jays) or 'digging' (groundhogs);
+    // and `scene.fire` { distance, dx } to the cabin's hearth, if there is one.
     function update(dt, scene, now = context ? context.currentTime : 0) {
       if (!parts) return;
       const ahead = now + 0.02;
@@ -239,14 +292,19 @@ const Sound = (() => {
       steer(parts.falls.level.gain, 'falls', falls * FALLS.level, FALLS.level, now, 0.3);
       if (parts.fallsSide.pan) steer(parts.fallsSide.pan, 'fallsSide', sideOf(scene.falls.dx), 1, now, 0.3);
       steer(parts.rustle.level.gain, 'rustle', scene.breeze * RUSTLE.level, RUSTLE.level, now, 0.7);
-      // Water babbles: each band rises and falls every tenth of a second or so.
-      parts.babble.forEach((band, i) => {
+      const fire = scene.fire ? nearness(scene.fire.distance, FIRE.near, FIRE.reach) : 0;
+      steer(parts.fire.level.gain, 'fire', fire * FIRE.level, FIRE.level, now, 0.3);
+      if (parts.fireSide.pan && scene.fire) steer(parts.fireSide.pan, 'fireSide', sideOf(scene.fire.dx), 1, now, 0.3);
+      // Water babbles: each band rises and falls every tenth of a second or so;
+      // the fire's hiss breathes a little slower.
+      parts.babble.concat([parts.fire]).forEach((band, i) => {
         if (now < parts.nextSwell[i]) return;
-        parts.nextSwell[i] = now + 0.05 + random() * 0.12;
-        band.swell.gain.setTargetAtTime(0.35 + random() * 0.65, now, 0.03);
+        parts.nextSwell[i] = now + (i < 2 ? 0.05 + random() * 0.12 : 0.1 + random() * 0.2);
+        band.swell.gain.setTargetAtTime(i < 2 ? 0.35 + random() * 0.65 : 0.55 + random() * 0.45, now, 0.03);
       });
       if (!on) return;
       if (water > 0 && random() < WATER.bubblesPerSecond * water * dt) bubble(ahead, water, sideOf(scene.water.dx));
+      if (fire > 0 && random() < FIRE.cracklesPerSecond * fire * dt) crackle(ahead, fire, sideOf(scene.fire.dx));
 
       // The animals: a jay sitting nearby sings now and then, one landing calls
       // as it settles, one flying close past may call once; a groundhog
@@ -284,7 +342,7 @@ const Sound = (() => {
     }
 
     return {
-      unlock, setOn, beep, update,
+      unlock, setOn, beep, creak, update,
       isOn: () => on,
       // A hidden page goes quiet; the sounds carry on when it comes back.
       pause: () => { if (context && context.suspend) context.suspend(); },

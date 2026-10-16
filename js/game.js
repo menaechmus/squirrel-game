@@ -14,6 +14,9 @@
   const RIVAL_NAMES = { jays: 'Blue jays', groundhogs: 'Groundhogs', squirrels: 'Grey squirrels' };
   const SOUND_KEY = 'squirrel-game-sound';   // 'off' once the player has turned sound off
   const GROW_BACK = [1, 3];    // in Explore, seconds before a taken acorn grows back somewhere else
+  const DOOR_NEAR = 28;        // the cabin's door opens when the squirrel is this close to it
+  const DOOR_SWING = [0.25, 0.45];   // seconds the door takes to swing open, and to shut
+  const ROOF_FADE = 0.25;      // seconds the cabin's roof takes to lift off, or come back
   // The pause button's picture: two upright bars, 14 by 10 pixels like the speaker.
   const PAUSE_BARS = ['....##..##....', '....##..##....', '....##..##....', '....##..##....', '....##..##....',
     '....##..##....', '....##..##....', '....##..##....', '....##..##....', '....##..##....'];
@@ -39,15 +42,19 @@
   const miniature = Hud.buildMinimap(level);
   const effects = Effects.create(level);
   const total = level.acorns.length;
+  const cabin = level.cabin;
+  const cabinArt = Scenery.props.cabin;
 
   // Test hooks: ?autoplay=N plays by itself at N times speed, &pace=0.4 slows
   // the test squirrel to 40% (closer to a person; 0 parks it), &seed=7 varies
-  // the rivals' luck, &mode=explore plays Explore instead of the race.
+  // the rivals' luck, &mode=explore plays Explore instead of the race, &house
+  // sends the test squirrel into the cabin for the golden acorn first.
   const params = new URLSearchParams(location.search);
   const auto = params.has('autoplay')
     ? {
       speed: Number(params.get('autoplay')) || 1, pace: params.has('pace') ? Number(params.get('pace')) : 1, target: null, way: null, leg: 0, best: Infinity, stalled: 0, noclip: 0, noclips: 0,
       grown: [], fewest: Infinity, most: 0, reported: -1,   // Explore: acorns grown back, and how many lay about at the fewest and most
+      house: params.has('house') ? { way: null, leg: 0, done: false, log: {} } : null,
     }
     : null;
   const random = seededRandom(params.has('seed') ? Number(params.get('seed')) : auto ? 1 : Date.now());
@@ -60,6 +67,9 @@
   let growing = [];     // in Explore, when each taken acorn grows back (seconds of `time`)
   let nextPhase = 0;    // each acorn bobs a little out of step with the rest
   let helpFrom = null;  // the panel the help was opened from, to go back to
+  let door = 0;         // the cabin's door: 0 shut, 1 wide open
+  let indoors = 0;      // 0 with the cabin's roof on, 1 with it lifted off (the squirrel inside)
+  let golden = false;   // whether the golden acorn has been found this round
   let acorns = [];
   let particles = [];
   let time = 0;
@@ -102,8 +112,13 @@
     const perCssPixel = viewW / canvas.getBoundingClientRect().width;
     const row = el('hud-row').getBoundingClientRect();
     const map = minimap.getBoundingClientRect();
+    // The golden acorn, once found, sits under the map: arrows keep clear of both.
+    const icon = el('golden').hidden ? map : el('golden').getBoundingClientRect();
     hudBottom = row.bottom * perCssPixel;
-    minimapBox = { left: map.left * perCssPixel, top: map.top * perCssPixel, right: map.right * perCssPixel, bottom: map.bottom * perCssPixel };
+    minimapBox = {
+      left: Math.min(map.left, icon.left) * perCssPixel, top: map.top * perCssPixel,
+      right: Math.max(map.right, icon.right) * perCssPixel, bottom: Math.max(map.bottom, icon.bottom) * perCssPixel,
+    };
   }
 
   // ---- sound ----
@@ -118,8 +133,8 @@
   const leafy = level.props.filter((prop) => Scenery.props[prop.sprite].hides && Scenery.props[prop.sprite].tops);
 
   // What the squirrel can hear from where it stands: the nearest water, the
-  // waterfall, leaves in a gust (more trees round it, more rustle), and the
-  // animals up to something.
+  // waterfall, leaves in a gust (more trees round it, more rustle), the
+  // animals up to something, and the cabin's fire.
   function listen(dt) {
     const trees = leafy.filter((tree) => Math.abs(tree.x - player.x) < 110 && Math.abs(tree.y - player.y) < 110).length;
     const gust = Math.max(0, Math.min(1, (effects.gust(player.x, clock) - 0.15) / 0.6));
@@ -129,6 +144,7 @@
       falls: { distance: Math.hypot(level.falls.x - player.x, level.falls.y - player.y), dx: level.falls.x - player.x },
       breeze: gust * Math.min(1, trees / 5),
       voices: rivals.voices(),
+      fire: { distance: Math.hypot(cabin.hearth.x - player.x, cabin.hearth.y - player.y), dx: cabin.hearth.x - player.x },
     });
   }
 
@@ -210,6 +226,10 @@
     player.idle = 0;
     player.sniffRound = -1;
     player.joy = 0;
+    door = 0;
+    indoors = 0;
+    golden = false;
+    el('golden').hidden = true;
     acorns = level.acorns.map((acorn, index) => ({ x: acorn.x, y: acorn.y, phase: index, claimedBy: null, gone: false }));
     nextPhase = acorns.length;
     for (const who of Object.keys(counts)) counts[who] = 0;
@@ -282,6 +302,67 @@
     updateHud();
   }
 
+  // The golden acorn, under the table in the cabin: a prize of its own, never
+  // one of `acorns`, so it is not counted, no thief or hint arrow knows of it,
+  // and the race ends without it.
+  function findGolden() {
+    golden = true;
+    player.joy = Sprites.cheer(player.joy);
+    burst(cabin.golden, '#ffe066', 46);
+    burst(cabin.golden, '#ffffff', 28);
+    sound('golden');
+    el('golden').hidden = false;
+    measureHud();
+    if (auto && auto.house) {
+      // What it asked the sound module for, and where the golden acorn shows (CSS pixels).
+      const log = auto.house.log;
+      log.chimes = (log.chimes || 0) + 1;
+      const box = (id) => { const b = el(id).getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.right), Math.round(b.bottom)]; };
+      log.iconAt = { icon: box('golden'), map: box('minimap'), row: box('hud-row'), window: [innerWidth, innerHeight] };
+    }
+  }
+
+  // The cabin's door opens as the squirrel comes near and shuts after it has
+  // gone; inside the walls, the roof lifts off.
+  function updateCabin(dt) {
+    const inside = Math.abs(player.x - cabin.x) < cabin.half && player.y < cabin.y && player.y > cabin.y - cabin.depth;
+    const near = inside || Math.hypot(player.x - cabin.door.x, player.y - cabin.door.y) < DOOR_NEAR;
+    if (near && door === 0) {
+      sounds.creak();
+      if (auto && auto.house) auto.house.log.creaks = (auto.house.log.creaks || 0) + 1;
+    }
+    door = near ? Math.min(1, door + dt / DOOR_SWING[0]) : Math.max(0, door - dt / DOOR_SWING[1]);
+    indoors = inside ? Math.min(1, indoors + dt / ROOF_FADE) : Math.max(0, indoors - dt / ROOF_FADE);
+    if (!golden && inside && Math.hypot(cabin.golden.x - player.x, cabin.golden.y - 3 - player.y) <= PICKUP_RADIUS) findGolden();
+    if (auto && auto.house) recordCabin(near, inside);
+  }
+
+  // The &house test hook's record: when each thing first happened (seconds of
+  // the round), on <body data-house>.
+  function recordCabin(near, inside) {
+    const log = auto.house.log;
+    const first = (name, happened) => { if (happened && log[name] === undefined) log[name] = +time.toFixed(3); };
+    first('near', near);
+    first('open', door === 1);
+    first('in', inside);
+    first('roofOff', indoors === 1);
+    first('golden', golden);
+    if (log.in !== undefined && log.youGoingIn === undefined) log.youGoingIn = counts.you;
+    if (log.out !== undefined && log.youComingOut === undefined) log.youComingOut = counts.you;
+    first('out', log.in !== undefined && !inside);
+    first('roofOn', log.roofOff !== undefined && indoors === 0);
+    first('away', log.near !== undefined && !near);
+    first('shut', log.open !== undefined && door === 0);
+    log.door = +door.toFixed(3);
+    log.indoors = +indoors.toFixed(3);
+    log.found = golden;
+    log.you = counts.you;
+    log.left = acorns.length;
+    log.icon = !el('golden').hidden;
+    log.countText = el('acorns').textContent;
+    document.body.dataset.house = JSON.stringify(log);
+  }
+
   // The park is empty: show who got what.
   function finish() {
     state = 'over';
@@ -291,6 +372,8 @@
     el('verdict').textContent = counts.you * 2 >= total ? 'Winter is sorted!'
       : counts.you > mostByRival ? 'Enough to get by' : 'A lean winter...';
     el('result').textContent = `You gathered ${counts.you} of ${total} acorns in ${formatTime(time)}`;
+    el('golden-found').hidden = !golden;
+    if (auto && auto.house && auto.house.log.endLine === undefined) auto.house.log.endLine = golden ? el('golden-found').textContent : '';
     // One label per kind of rival; each stays whole if the line wraps on a narrow screen.
     el('rivals').textContent = '';
     for (const who of Object.keys(RIVAL_NAMES)) {
@@ -308,12 +391,12 @@
     el('mute-menu').hidden = false;
     el('again').focus();
     if (auto) {
-      document.body.dataset.result = `you=${counts.you} jays=${counts.jays} groundhogs=${counts.groundhogs} squirrels=${counts.squirrels} total=${total} time=${time.toFixed(1)} noclips=${auto.noclips}`;
+      document.body.dataset.result = `you=${counts.you} jays=${counts.jays} groundhogs=${counts.groundhogs} squirrels=${counts.squirrels} total=${total} time=${time.toFixed(1)} noclips=${auto.noclips} golden=${golden ? 1 : 0}`;
       if (params.has('restart')) {
         // After this update is over: a round can end part-way through one, and Play again resets the rivals.
         setTimeout(() => {
           el('again').click();
-          document.body.dataset.restart = `${el('acorns').textContent} ${state} over-hidden=${el('over').hidden}`;
+          document.body.dataset.restart = `${el('acorns').textContent} ${state} over-hidden=${el('over').hidden} golden-hidden=${el('golden').hidden}`;
         }, 0);
       }
       auto.speed = 0;
@@ -339,6 +422,7 @@
   // something is in that straight line it takes the way round, as a person
   // would: round the ponds and the mountain, over a bridge.
   function autoVector(dt) {
+    if (auto.house && !auto.house.done) return houseVector();
     const nearest = nearestAcorn();
     if (!nearest) return { x: 0, y: 0 };
     const far = (acorn) => Math.hypot(acorn.x - player.x, acorn.y - player.y);
@@ -370,6 +454,32 @@
       }
     }
     auto.noclip -= dt;
+    return { x: ((goal.x - player.x) / distance) * auto.pace, y: ((goal.y - player.y) / distance) * auto.pace };
+  }
+
+  // The &house test hook: first the test squirrel walks to the cabin's
+  // doorstep (the way round anything in between), in through the door, to the
+  // golden acorn under the table, and out again down the little path.
+  function houseVector() {
+    const house = auto.house;
+    if (!house.way) {
+      const step = { x: cabin.door.x, y: cabin.door.y + 14 };
+      house.way = (level.clearLine(player, step) ? [step] : level.wayTo(player, step) || [step]).concat([
+        { x: cabin.door.x, y: cabin.door.y - 12 },
+        { x: cabin.golden.x + 2, y: cabin.golden.y + 6 },
+        { x: cabin.door.x, y: cabin.door.y - 12 },
+        { x: cabin.door.x, y: cabin.door.y + 20 },
+        { x: cabin.door.x + 12, y: cabin.door.y + 52 },
+      ]);
+      house.leg = 0;
+    }
+    const goal = house.way[house.leg];
+    const distance = Math.hypot(goal.x - player.x, goal.y - player.y);
+    if (distance < 2) {
+      house.leg++;
+      if (house.leg >= house.way.length) house.done = true;
+      return { x: 0, y: 0 };
+    }
     return { x: ((goal.x - player.x) / distance) * auto.pace, y: ((goal.y - player.y) / distance) * auto.pace };
   }
 
@@ -428,6 +538,7 @@
       sniffAround();
     }
     level.pushOut(player, PLAYER_RADIUS, !(auto && auto.noclip > 0));
+    updateCabin(dt);
 
     for (const acorn of acorns.slice()) {
       if (Math.hypot(acorn.x - player.x, acorn.y - 3 - player.y) <= PICKUP_RADIUS) takeAcorn(acorn, 'you');
@@ -466,6 +577,32 @@
     return { x: cameraOffset(Math.round(player.x), viewW), y: cameraOffset(Math.round(player.y), viewH), w: viewW, h: viewH };
   }
 
+  // The cabin's layers for the depth sort, at (x, y) on screen. With the roof
+  // on: the outside, lit by the fire, and the door. With it off: the walls
+  // (behind everything inside), the table, the golden acorn under it, and the
+  // front sill (in front of everything inside). In between, both, fading.
+  function addCabin(things, x, y, lit) {
+    const house = cabinArt.house;
+    if (indoors < 1) {
+      const alpha = indoors > 0 ? 1 - indoors : undefined;
+      things.push({ sprite: cabinArt.frames[lit], x, y, depth: cabin.y, alpha });
+      things.push({ sprite: cabinArt.doors[Math.round(door * 3)], x: x + house.doorway.x, y: y + house.doorway.y, depth: cabin.y + 0.001, alpha });
+    }
+    if (indoors > 0) {
+      const alpha = indoors < 1 ? indoors : undefined;
+      const offX = x + (cabinArt.frames[0].width >> 1) - cabin.x;   // from park pixels to the screen
+      const offY = y + cabinArt.frames[0].height - cabin.y;
+      things.push({ sprite: cabinArt.insideWalls[lit], x, y, depth: cabin.y - cabin.depth - 0.5, alpha });
+      const table = cabinArt.table[lit];
+      things.push({ sprite: table, x: offX + cabin.table.x - (table.width >> 1), y: offY + cabin.table.y - table.height, depth: cabin.table.y, alpha });
+      if (!golden) {
+        const bob = Math.round(Math.sin(clock * 4) * 1.5);
+        things.push({ sprite: Sprites.goldenAcorn, x: offX + cabin.golden.x - 4, y: offY + cabin.golden.y - 12 - bob, depth: cabin.golden.y, alpha });
+      }
+      things.push({ sprite: cabinArt.sill, x, y, depth: cabin.y + 0.002, alpha });
+    }
+  }
+
   function draw() {
     const view = cameraView();
     const camX = view.x;
@@ -476,6 +613,15 @@
     ctx.drawImage(pond.frames[effects.pondFrame(clock)], pond.x - camX, pond.y - camY);
     ctx.drawImage(brook.frames[Scenery.flowFrame(clock)], brook.x - camX, brook.y - camY);
     for (const decal of rivals.decals()) ctx.drawImage(decal.sprite, decal.x - camX, decal.y - camY);
+    const lit = Scenery.flicker(clock);
+    const cabinLeft = cabin.x - (cabinArt.frames[0].width >> 1) - camX;
+    const cabinTop = cabin.y - cabinArt.frames[0].height - camY;
+    if (indoors > 0) {
+      // The cabin's floor, under everything inside, shadows too.
+      ctx.globalAlpha = indoors;
+      ctx.drawImage(cabinArt.insideFloor[lit], cabinLeft, cabinTop);
+      ctx.globalAlpha = 1;
+    }
 
     const px = Math.round(player.x) - camX;
     const py = Math.round(player.y) - camY;
@@ -498,8 +644,13 @@
       const x = prop.x - (width >> 1) - camX;
       const y = prop.y - height - camY;
       if (x < viewW && y < viewH && x + width > 0 && y + height > 0) {
-        const sprite = art.frames.length === 1 ? art.frames[0] : Scenery.frame(art, effects.lean(prop.x, prop.y, clock), clock);
-        things.push({ sprite, x, y, depth: prop.y });
+        if (art === cabinArt) {
+          addCabin(things, x, y, lit);
+          if (indoors >= 0.5) continue;   // the squirrel is inside, in plain view
+        } else {
+          const sprite = art.frames.length === 1 ? art.frames[0] : Scenery.frame(art, effects.lean(prop.x, prop.y, clock), clock);
+          things.push({ sprite, x, y, depth: prop.y });
+        }
         if (art.hides && prop.y > player.y && px > x && px < x + width && py - 8 > y && py - 8 < y + height) {
           behindTree = true;
         }
@@ -523,12 +674,14 @@
     things.push(squirrel);
     things.sort((a, b) => a.depth - b.depth);
     for (const thing of things) {
+      if (thing.alpha !== undefined) ctx.globalAlpha = thing.alpha;
       if (thing.clip) {
         // Only the top rows: a groundhog partly out of its hole.
         ctx.drawImage(thing.sprite, 0, 0, thing.sprite.width, thing.clip, thing.x, thing.y, thing.sprite.width, thing.clip);
       } else {
         ctx.drawImage(thing.sprite, thing.x, thing.y);
       }
+      ctx.globalAlpha = 1;
     }
     if (behindTree) {
       // Show a faint squirrel through the leaves so the player never loses track of it.
@@ -538,6 +691,7 @@
     }
 
     effects.drawLeaves(ctx, camX, camY);
+    effects.drawSmoke(ctx, camX, camY, cabin.chimney, clock);
     for (const flyer of rivals.flyers()) ctx.drawImage(flyer.sprite, flyer.x - camX, flyer.y - camY);
     effects.drawClouds(ctx, camX, camY, viewW, viewH);
 
@@ -639,6 +793,7 @@
   }
 
   el('pause').innerHTML = pausePicture();
+  el('golden').innerHTML = `<img src="${Sprites.goldenAcorn.toDataURL()}" alt="">`;
   el('pause').addEventListener('click', pause);
   el('resume').addEventListener('click', resume);
   el('restart').addEventListener('click', () => start());

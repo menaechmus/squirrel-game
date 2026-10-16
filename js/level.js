@@ -45,6 +45,14 @@ const Level = (() => {
   ];
   const PATH_HALF = 6;   // half a path's width
 
+  // ---- the log cabin (1.12) ----
+  // Northwest of the crossing: the middle of the foot of its front wall, and a
+  // little path (from there, in pixels) that bends from its doorstep down to
+  // the west-east path, near where the squirrel starts.
+  const CABIN = { x: 392, y: 428 };
+  const LANE = [[0, 1], [2, 16], [11, 32], [26, 51]];
+  const LANE_HALF = 4;
+
   // ---- trees ----
   // Most trees stand in copses: clumps whose tops meet, each mostly of one
   // kind. The rest stand alone or in twos and threes between them. (More trees
@@ -172,7 +180,11 @@ const Level = (() => {
       return Math.hypot(x - near.x, y - near.y) < strip.reach + radius;
     });
     // Water and the mountain: nothing grows or stands in or on them.
-    const inFeature = (x, y, pad) => inAnyPond(x, y, pad) || onMountain(x, y, pad) || nearStream(x, y, pad);
+    // Once the cabin stands (see below), its ground counts too.
+    let cabin = null;
+    const inHouse = (x, y, pad) => cabin !== null && x > cabin.x - cabin.ends - pad && x < cabin.x + cabin.ends + pad
+      && y > cabin.y - cabin.depth - pad && y < cabin.y + pad;
+    const inFeature = (x, y, pad) => inAnyPond(x, y, pad) || onMountain(x, y, pad) || nearStream(x, y, pad) || inHouse(x, y, pad);
 
     // ---- the paths ----
     const paths = PATH_COURSES.map((list) => ({ points: smoothCourse(list.map(([x, y]) => ({ x, y }))), half: PATH_HALF }));
@@ -182,17 +194,20 @@ const Level = (() => {
     const REACH = 72;
     const fieldCols = SIZE / FIELD;
     const pathAway = new Float32Array(fieldCols * fieldCols).fill(REACH);
-    for (const { points } of paths) {
+    // A narrower path is entered as if its line were further off, so that
+    // `onPath` measures from its edge the same as for the others.
+    function markPath({ points, half }) {
       for (let i = 0; i < points.length; i += 3) {
         const point = points[i];
         for (let row = Math.max(0, Math.floor((point.y - REACH) / FIELD)); row <= Math.min(fieldCols - 1, Math.floor((point.y + REACH) / FIELD)); row++) {
           for (let col = Math.max(0, Math.floor((point.x - REACH) / FIELD)); col <= Math.min(fieldCols - 1, Math.floor((point.x + REACH) / FIELD)); col++) {
-            const away = Math.hypot((col + 0.5) * FIELD - point.x, (row + 0.5) * FIELD - point.y);
+            const away = Math.hypot((col + 0.5) * FIELD - point.x, (row + 0.5) * FIELD - point.y) + PATH_HALF - half;
             if (away < pathAway[col + row * fieldCols]) pathAway[col + row * fieldCols] = away;
           }
         }
       }
     }
+    paths.forEach(markPath);
     const fromPath = (x, y) => pathAway[Math.min(fieldCols - 1, Math.max(0, Math.floor(x / FIELD))) + Math.min(fieldCols - 1, Math.max(0, Math.floor(y / FIELD))) * fieldCols];
     const onPath = (x, y, pad) => fromPath(x, y) < PATH_HALF + pad;
 
@@ -205,6 +220,8 @@ const Level = (() => {
 
     const props = [{ sprite: 'mountain', x: mountain.x, y: mountain.y }];
     const solids = [];
+    // The cabin's walls, as thin boxes on the ground (filled in once it stands).
+    const boxes = [];
     function place(sprite, x, y, r) {
       taken.push({ x, y, r });
       const prop = { sprite, x, y };
@@ -292,11 +309,55 @@ const Level = (() => {
       const sprite = LOGS[Math.floor(rand() * LOGS.length)];
       if (!isFree(spot.x, spot.y, 18)) continue;
       taken.push({ x: spot.x, y: spot.y, r: 18 });
-      props.push({ sprite, x: spot.x, y: spot.y });
+      const prop = { sprite, x: spot.x, y: spot.y };
+      props.push(prop);
       const half = Scenery.props[sprite].frames[0].width / 2 - 5;
-      for (let along = -half; along <= half + 0.01; along += (2 * half) / Math.ceil((2 * half) / 7)) solids.push({ x: spot.x + along, y: spot.y - 5, r: 5 });
+      for (let along = -half; along <= half + 0.01; along += (2 * half) / Math.ceil((2 * half) / 7)) solids.push({ x: spot.x + along, y: spot.y - 5, r: 5, owner: prop });
       logs.push({ x: spot.x, y: spot.y });
     }
+
+    // ---- the log cabin (1.12) ----
+    // Built after everything else that stands in the park, so nothing placed
+    // before it moves: whatever stood on its ground or on its little path is
+    // cleared away.
+    const house = Scenery.props.cabin.house;
+    const lane = { points: smoothCourse(LANE.map(([dx, dy]) => ({ x: CABIN.x + dx, y: CABIN.y + dy }))), half: LANE_HALF };
+    const onLane = (x, y, pad) => lane.points.some((point) => Math.hypot(x - point.x, y - point.y) < LANE_HALF + pad);
+    cabin = { x: CABIN.x, y: CABIN.y, half: house.half, depth: house.depth, ends: house.ends };
+    const cleared = props.filter((prop) => prop.sprite !== 'mountain' && (inHouse(prop.x, prop.y, 8) || onLane(prop.x, prop.y, 6)));
+    for (const prop of cleared) {
+      props.splice(props.indexOf(prop), 1);
+      for (let i = solids.length - 1; i >= 0; i--) if (solids[i].owner === prop) solids.splice(i, 1);
+      const log = logs.findIndex((each) => each.x === prop.x && each.y === prop.y);
+      if (log >= 0) logs.splice(log, 1);
+    }
+    props.push({ sprite: 'cabin', x: CABIN.x, y: CABIN.y });
+    paths.push(lane);
+    markPath(lane);
+    // Its walls: the back, the two sides out to the log ends, and the front
+    // either side of the doorway.
+    const wallLeft = CABIN.x - house.ends;
+    const wallRight = CABIN.x + house.ends;
+    const wallBack = CABIN.y - house.depth;
+    boxes.push(
+      { left: wallLeft, right: wallRight, top: wallBack, bottom: wallBack + house.thick },
+      { left: wallLeft, right: CABIN.x - house.half + house.thick, top: wallBack, bottom: CABIN.y },
+      { left: CABIN.x + house.half - house.thick, right: wallRight, top: wallBack, bottom: CABIN.y },
+      { left: wallLeft, right: CABIN.x - house.door, top: CABIN.y - house.thick, bottom: CABIN.y },
+      { left: CABIN.x + house.door, right: wallRight, top: CABIN.y - house.thick, bottom: CABIN.y },
+    );
+    // Where things are, for the game: the doorway, inside the walls, the top of
+    // the chimney, the fire, the table and the golden acorn under it.
+    const cabinSpot = ({ dx, dy }) => ({ x: CABIN.x + dx, y: CABIN.y + dy });
+    Object.assign(cabin, {
+      door: { x: CABIN.x, y: CABIN.y, half: house.door },
+      inside: { left: CABIN.x - house.half + house.thick, right: CABIN.x + house.half - house.thick, top: wallBack + house.thick, bottom: CABIN.y - house.thick },
+      chimney: cabinSpot(house.chimney), hearth: cabinSpot(house.hearth), table: cabinSpot(house.table), golden: cabinSpot(house.golden),
+      cleared: cleared.map((prop) => [prop.sprite, prop.x, prop.y]),
+    });
+    // An acorn just behind the cabin would be hidden by its roof.
+    const cabinPicture = Scenery.props.cabin.frames[0];
+    const behindCabin = (x, y) => Math.abs(x - cabin.x) < cabinPicture.width / 2 + 2 && y < cabin.y && y > cabin.y - cabinPicture.height - 4;
 
     // An acorn is unfair if a tree further down the screen draws over it.
     const trees = props.filter((prop) => Scenery.props[prop.sprite].hides && Scenery.props[prop.sprite].tops);
@@ -334,8 +395,29 @@ const Level = (() => {
           creature.y += gy * t;
         }
       };
+      // Off a wall of the cabin, from its nearest point, so that a creature
+      // slides round a corner (into the doorway, say) instead of catching on it.
+      const offBox = (box) => {
+        const nearX = Math.max(box.left, Math.min(box.right, creature.x));
+        const nearY = Math.max(box.top, Math.min(box.bottom, creature.y));
+        const dx = creature.x - nearX;
+        const dy = creature.y - nearY;
+        if (dx * dx + dy * dy >= radius * radius) return;
+        const distance = Math.hypot(dx, dy);
+        if (distance > 0.01) {
+          creature.x = nearX + (dx / distance) * radius;
+          creature.y = nearY + (dy / distance) * radius;
+          return;
+        }
+        // Its middle is inside the wall: out by the nearest side.
+        const ways = [[creature.x - box.left, -1, 0], [box.right - creature.x, 1, 0], [creature.y - box.top, 0, -1], [box.bottom - creature.y, 0, 1]];
+        const [depth, sideways, down] = ways.reduce((best, way) => (way[0] < best[0] ? way : best));
+        creature.x += sideways * (depth + radius);
+        creature.y += down * (depth + radius);
+      };
       for (let pass = 0; pass < 2; pass++) {
         if (scenery) {
+          for (const box of boxes) offBox(box);
           for (const solid of solids) {
             const dx = creature.x - solid.x;
             const dy = creature.y - solid.y;
@@ -391,11 +473,12 @@ const Level = (() => {
       return best;
     }
 
-    // Is a circle here touching scenery, water or the hedge?
+    // Is a circle here touching scenery, water or the hedge? The whole cabin
+    // counts, inside too: only the player's squirrel goes in.
     function blocked(x, y, radius) {
       return !inPark(x, y, radius) || inAnyPond(x, y, radius + 6)
         || solids.some((solid) => Math.hypot(x - solid.x, y - solid.y) < solid.r + radius)
-        || onMountain(x, y, radius) || inStream(x, y, radius);
+        || onMountain(x, y, radius) || inStream(x, y, radius) || inHouse(x, y, radius);
     }
 
     // ---- finding the way ----
@@ -407,7 +490,7 @@ const Level = (() => {
         const x = (col + 0.5) * CELL;
         const y = (row + 0.5) * CELL;
         const inside = x > BORDER + CLEARANCE && x < SIZE - BORDER - CLEARANCE && y > BORDER + 10 + CLEARANCE && y < SIZE - BORDER - CLEARANCE;
-        open[col + row * COLS] = inside && !onMountain(x, y, CLEARANCE) && !inStream(x, y, CLEARANCE)
+        open[col + row * COLS] = inside && !onMountain(x, y, CLEARANCE) && !inStream(x, y, CLEARANCE) && !inHouse(x, y, CLEARANCE)
           && !ponds.some((each) => ((x - each.x) / (each.a + CLEARANCE)) ** 2 + ((y - each.y - 5) / (each.b + CLEARANCE + 5)) ** 2 < 1) ? 1 : 0;
       }
     }
@@ -590,8 +673,8 @@ const Level = (() => {
     };
     // The rules every acorn keeps, here and when Explore grows a new one: in
     // the park, clear of water, the mountain and anything solid, not under a
-    // tree top, and somewhere the squirrel can get to.
-    const acornFits = (x, y) => inPark(x, y, 6) && !inFeature(x, y, 13) && !hiddenByTree(x, y) && !blocked(x, y, 6) && canReach(x, y);
+    // tree top or the cabin's roof, and somewhere the squirrel can get to.
+    const acornFits = (x, y) => inPark(x, y, 6) && !inFeature(x, y, 13) && !hiddenByTree(x, y) && !behindCabin(x, y) && !blocked(x, y, 6) && canReach(x, y);
     const acorns = [];
     // A tucked acorn sits right beside its tree or bush, inside that prop's own
     // elbow room, so it is checked against trunks, rocks and other acorns instead.
@@ -643,10 +726,11 @@ const Level = (() => {
     props.sort((a, b) => a.y - b.y);
 
     return {
-      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, falls, paths, logs, props, acorns,
+      size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, falls, paths, logs, props, acorns, cabin,
       pushOut, blocked, nearestWater, acornFits, newAcornSpot, wayTo, nearestByWay, clearLine, distancesFrom, distanceTo,
-      // For tests: the copses, and the route grid.
+      // For tests: the copses, the cabin's walls, and the route grid.
       copses: copses.map((copse) => ({ x: copse.x, y: copse.y, radius: copse.radius, trees: copse.trees.length })),
+      boxes,
       grid: { cell: CELL, cols: COLS, open, isOpen: (x, y) => open[cellOf(x, y)] === 1 },
     };
   }

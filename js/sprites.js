@@ -213,7 +213,7 @@ const Sprites = (() => {
     return Math.round(height * 4 * part * (1 - part));
   }
 
-  const acorn = fromText([
+  const ACORN = [
     '...kk...',
     '...kb...',
     '.kAAAAk.',
@@ -224,7 +224,10 @@ const Sprites = (() => {
     '.kaaaak.',
     '..kaak..',
     '...kk...',
-  ]);
+  ];
+  const acorn = fromText(ACORN);
+  // The golden acorn hidden in the log cabin (1.12): the same acorn in gold.
+  const goldenAcorn = fromText(ACORN, { a: '#f2c230', y: '#fff6b0', A: '#b8862a', b: '#8a5a1a', k: '#5a3a10' });
 
   // Blue jay in flight, facing right: wings up, then wings down.
   const JAY = [
@@ -422,6 +425,7 @@ const Sprites = (() => {
     cheer,
     joyLift,
     acorn,
+    goldenAcorn,
     jay: { right: jayRight, left: jayRight.map(mirrored) },
     jaySitting: sittingJay(),
     groundhog,

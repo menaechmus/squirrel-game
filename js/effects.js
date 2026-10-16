@@ -1,11 +1,14 @@
 // Weather: the wind that everything sways to, drifting cloud shadows, the
-// pond's ripple timing, and leaves shaken loose in gusts.
+// pond's ripple timing, leaves shaken loose in gusts, and the cabin's smoke.
 
 const Effects = (() => {
   const POND_FRAMES_PER_SECOND = 2.5;
   const CLOUD_SPEED = 13;       // game pixels per second
   const LEAF_GUST = 1.5;        // wind strength at which trees start shedding
   const LEAVES_PER_SECOND = 0.5;
+  // Chimney smoke: a puff this often (seconds), each lasting this long, rising
+  // this fast (pixels a second) and drifting sideways with the wind.
+  const SMOKE = { every: 0.42, life: 3.4, rise: 13, drift: 6, faint: 0.45 };
 
   // How hard the wind pushes at a spot, roughly -1 (swinging back) to 2.5 (gust).
   // A slow swell and occasional strong gusts both travel left to right across
@@ -69,6 +72,33 @@ const Effects = (() => {
       }
     }
 
+    // Light smoke from the cabin's chimney: puffs that rise, grow and fade, each
+    // carried sideways by the wind it met on the way up. It goes by the clock,
+    // so it stands still while the game is paused.
+    function drawSmoke(ctx, camX, camY, chimney, clock) {
+      const puffs = Scenery.props.cabin.puffs;
+      const newest = Math.floor(clock / SMOKE.every);
+      ctx.save();
+      for (let k = Math.ceil(SMOKE.life / SMOKE.every); k >= 0; k--) {
+        const born = (newest - k) * SMOKE.every;
+        const age = clock - born;
+        if (age < 0 || age >= SMOKE.life) continue;
+        // The wind along the way, sampled four times; the park's breeze mostly
+        // blows to the right, so the smoke leans that way unless it swings back.
+        let drift = 0;
+        for (let i = 0; i < 4; i++) {
+          const then = ((i + 0.5) / 4) * age;
+          drift += (0.5 + lean(chimney.x, chimney.y - SMOKE.rise * then, born + then)) * (age / 4);
+        }
+        const x = chimney.x + drift * SMOKE.drift + Math.sin(age * 2.2 + (newest - k) * 1.7) * 1.2;
+        const y = chimney.y - SMOKE.rise * age + 0.6 * age * age;
+        const sprite = puffs[age < 0.45 ? 0 : age < 1.2 ? 1 : age < 2.1 ? 2 : 3];
+        ctx.globalAlpha = SMOKE.faint * (1 - age / SMOKE.life);
+        ctx.drawImage(sprite, Math.round(x - sprite.width / 2) - camX, Math.round(y - sprite.height / 2) - camY);
+      }
+      ctx.restore();
+    }
+
     function drawClouds(ctx, camX, camY, viewW, viewH) {
       for (const cloud of clouds) {
         const x = Math.round(cloud.x) - camX;
@@ -85,6 +115,7 @@ const Effects = (() => {
       pondFrame: (clock) => Math.floor(clock * POND_FRAMES_PER_SECOND) % 4,
       update,
       drawLeaves,
+      drawSmoke,
       drawClouds,
     };
   }

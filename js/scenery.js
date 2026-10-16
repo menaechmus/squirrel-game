@@ -589,6 +589,378 @@ const Scenery = (() => {
     return { frames, falls: { dx: fallsX - (w >> 1), dy: bottomAtFalls + 1 - h } };
   }
 
+  // ---- the log cabin ----
+
+  // The log cabin by the crossing (1.12), its front facing down the screen:
+  // log walls whose ends cross at the corners, a roof of wooden shakes, a stone
+  // chimney at the right end, and a plank door between two windows lit by the
+  // fire inside. With the roof lifted off, when the squirrel goes in: a plank
+  // floor, log walls, a small fire in a stone hearth under the chimney, and a
+  // table with a candle. Whatever the fire or the candle lights comes in four
+  // frames, dim to bright, picked by flicker(clock). Measurements are in pixels
+  // from the middle of the foot of the front wall: X to the right, Y up the
+  // picture (so negative).
+  const CABIN = {
+    w: 98, h: 86,                   // the picture
+    half: 43, depth: 46, thick: 5,  // the walls on the ground: half the width, front to back, and how thick
+    ends: 47,                       // how far out the log ends reach at the corners
+    door: 8,                        // half the doorway's width
+    windows: [-25, 25],             // the middle of each window
+    chimney: [24, 32],              // its first and last columns
+    hearth: 27,                     // the middle of the fire
+    table: { x: -28, y: -27 },      // the middle of the table's front legs, on the floor
+  };
+  const SHAKES = ['#ab9878', '#8d7c5e', '#71624a', '#564a38', '#3d3529'];
+  const PLANKS = ['#b08250', '#926a42', '#775334', '#5c3e27', '#43291a'];
+  const FLOOR = ['#c99e66', '#ad8557', '#916d48', '#745539', '#583f2b'];
+  const FIRELIGHT = ['#fff4c0', '#ffd77a', '#f6a845', '#de7a32', '#a8501f'];
+  const LOG_END = ['#e6c690', '#c49a5e', '#8f6a3f'];
+  const FIELDSTONE = ['#c9c0b2', '#a89e90', '#8a8174', '#6c645a', '#4f4943'];
+
+  // Which of the four frames the firelight is on: it wanders unevenly, mostly
+  // between the middle two, now and then dimmer or brighter.
+  const flicker = (clock) => Math.min(3, Math.floor(smoothNoise(clock * 7, 0, 1, 88) * 4));
+
+  function logCabin() {
+    const { w, h, half, ends, door } = CABIN;
+    const cx = w >> 1;
+    const gy = h - 1;
+    // A picture built from parts, each with an outline where it meets nothing or
+    // a part behind it: `partAt` names the part at (X, Y), `colorAt` colours it.
+    // A higher part stands in front of a lower one. With `area`, only that
+    // rectangle of the picture (in its pixels).
+    const build = (partAt, colorAt, area = { x: 0, y: 0, w, h }) => pixelCanvas(area.w, area.h, (px, py) => {
+      const x = px + area.x;
+      const y = py + area.y;
+      const X = x - cx;
+      const Y = y - gy;
+      const part = partAt(X, Y);
+      if (!part) return null;
+      if (part !== 4 && (partAt(X + 1, Y) < part || partAt(X - 1, Y) < part || partAt(X, Y + 1) < part || partAt(X, Y - 1) < part)) return OUTLINE.bark;
+      return colorAt(X, Y, part, x, y);
+    });
+
+    // A wall of logs seen from the side, its foot at Y = `foot`: four rows to a
+    // log, lit on top, with a dark line under each; each log a little different.
+    const logs = (X, Y, foot, shift, x, y) => {
+      const up = foot - Y;
+      const k = Math.floor(up / 4);
+      const row = up % 4;
+      let shade = [0.88, 0.55, 0.32, 0.14][row] + (hash(k, foot, 71) - 0.5) * 0.14 + smoothNoise(X, k * 9, 6, 72) * 0.14 - 0.07 + shift;
+      if (row > 0 && hash(x, y, 73) < 0.07) shade += 0.18;   // knots and grain
+      return tone(RAMPS.bark, shade, x, y, false);
+    };
+    // The corners, beyond the walls: on every other log the front log runs on a
+    // little, rounded off; on the rest the end of a side log faces out, ringed.
+    const corner = (X, Y, foot) => {
+      const out = X < 0 ? -X - half : X - half + 1;   // 1 to 5 beyond the wall
+      if (out < 1 || out > 5 || Y > foot) return null;
+      const up = foot - Y;
+      const row = up % 4;
+      if (Math.floor(up / 4) % 2 === 0) return out <= 4 && (out < 4 || (row === 1 || row === 2)) ? 'log' : null;
+      if ((row === 0 || row === 3) && (out === 1 || out === 5)) return null;
+      return out === 3 && (row === 1 || row === 2) ? 'heart' : (row === 0 || row === 3 || out === 1 || out === 5) ? 'rim' : 'ring';
+    };
+    const cornerColor = { heart: LOG_END[0], ring: LOG_END[1], rim: LOG_END[2] };
+
+    // ---- outside ----
+    const inWindow = (X, Y) => CABIN.windows.find((middle) => Math.abs(X - middle) <= 6 && Y >= -16 && Y <= -6);
+    const outsidePart = (X, Y) => {
+      if (X >= CABIN.chimney[0] && X <= CABIN.chimney[1] && Y >= -85 && Y <= -63) return 3;
+      if (X >= -49 && X <= 48 && Y >= -73 && Y <= -20) return 2;
+      if (Y < -19 || Y > 0) return 0;
+      if (X >= -door - 1 && X <= door && Y >= -19) return 4;   // the doorway and its frame
+      if (X >= -half && X < half) return 1;
+      return corner(X, Y, 0) ? 1 : 0;
+    };
+    // The shakes: rows four pixels deep on the near side of the ridge, three on
+    // the far side, a dark line under each row, the shakes 4 to 8 pixels wide;
+    // weathered, with grain, and moss along the eaves.
+    const joints = [];
+    for (let course = 0; course < 16; course++) {
+      const row = new Uint8Array(w + 1);
+      for (let at = Math.floor(hash(course, 3, 74) * 6); at <= w; at += 4 + Math.floor(hash(at, course, 74) * 5)) row[at] = 1;
+      joints.push(row);
+    }
+    const roof = (X, Y, x, y) => {
+      if (Y >= -62 && Y <= -60) {
+        // The ridge cap: lit along its top, dark beneath.
+        if ((X + 49) % 11 === 0 && Y > -62) return SHAKES[3];
+        return tone(SHAKES, [0.02, 0.22, 0.95][Y + 62], x, y, false);
+      }
+      if (X <= -48 || X >= 47) return tone(PLANKS, (X <= -48 ? 0.25 : 0.55) + (X === -49 || X === 48 ? 0.15 : 0), x, y, false);   // the boards at the ends
+      if (Y === -20) return OUTLINE.bark;                         // the edge of the eaves, over the doorway too
+      if (Y === -21) return PLANKS[X % 7 === 0 ? 2 : 1];        // the board along the eaves
+      const near = Y > -60;
+      const course = near ? Math.floor((-22 - Y) / 4) : Math.floor((-63 - Y) / 3);
+      const row = near ? (-22 - Y) % 4 : (-63 - Y) % 3;
+      const line = joints[near ? course : 12 + course];
+      const along = X + 49;
+      let start = along;
+      while (start > 0 && !line[start]) start--;
+      let shade = near ? [0.9, 0.32, 0.42, 0.5][row] : [0.62, 0.1, 0.18][row];
+      if (row > 0 && line[along]) shade += 0.3;                  // where two shakes butt
+      if (row > 0 && hash(along, course, 90) < 0.18) shade += 0.09;   // grain
+      shade += (hash(start, course, 75) - 0.5) * 0.2 + along * 0.0015;
+      if (near && Y < -56) shade += 0.15;                        // in the shadow of the ridge
+      // A little moss along the eaves, where the roof stays damp.
+      if (near && Y > -36 && smoothNoise(x, y, 5, 76) > 0.77) return tone(RAMPS.moss, row === 0 ? 0.95 : 0.55 + row * 0.1, x, y, false);
+      if (!near && X > CABIN.chimney[1] && X <= CABIN.chimney[1] + 3) shade += 0.25;   // the chimney's shadow
+      return tone(SHAKES, shade, x, y, false);
+    };
+    // Rows of stones three pixels high, mortar between, lit from the left.
+    const stones = (X, Y, x, y, foot) => {
+      const course = Math.floor((foot - Y) / 3);
+      const row = (foot - Y) % 3;
+      const along = X + course * 2 + 40;
+      if (row === 0 || along % 4 === 0) return FIELDSTONE[4];
+      const shade = 0.32 + (hash(Math.floor(along / 4), course, 77) - 0.5) * 0.36 + (X - CABIN.hearth) * 0.025 + (row === 2 ? -0.1 : 0.06);
+      return tone(FIELDSTONE, shade, x, y, false);
+    };
+    const chimney = (X, Y, x, y) => {
+      if (Y === -84 && X > CABIN.chimney[0] + 1 && X < CABIN.chimney[1] - 1) return '#1a120e';   // the flue
+      if (Y <= -83) return FIELDSTONE[Y === -84 ? 1 : 2];                                        // the cap
+      return stones(X, Y, x, y, -63);
+    };
+    // A window: a dark frame, a wooden one inside it, a cross dividing the glass,
+    // and a sill; the glass glows with the fire, brighter low down.
+    const pane = (X, Y, middle, f, x, y) => {
+      const across = X - middle;
+      if (Math.abs(across) === 6 || Y === -16 || Y === -6) return OUTLINE.bark;
+      if (Math.abs(across) === 5 || Y === -15 || Y === -7) return PLANKS[1];
+      if (across === 0 || Y === -11) return PLANKS[2];
+      const shade = 0.66 - f * 0.14 + (-11 - Y) * 0.05 - (across < 0 ? 0 : 0.06);
+      return tone(FIRELIGHT, shade, x, y, false);
+    };
+    // The doorway, behind the door: a dark room, lit low down by the fire.
+    const doorway = (X, Y, f, x, y) => {
+      if (X === -door - 1 || X === door) return OUTLINE.bark;                       // the posts
+      if (Y === -19) return OUTLINE.bark;
+      if (Y === -18) return PLANKS[2];                                               // the lintel
+      const glow = (Y + 8) / 8 + (X + door) / 32 + f * 0.12;
+      if (glow > 1.35 && (x + y) % 2 === 0) return FIRELIGHT[3];
+      if (glow > 0.9) return '#5a2c18';
+      return glow > 0.5 && (x + y) % 2 === 0 ? '#3a1e12' : '#24150e';
+    };
+    const outsideStill = (X, Y, part, x, y) => {
+      if (part === 3) return chimney(X, Y, x, y);
+      if (part === 2) return roof(X, Y, x, y);
+      if (part === 4) return doorway(X, Y, 0, x, y);
+      const end = corner(X, Y, 0);
+      if (end && end !== 'log') return cornerColor[end];
+      if (inWindow(X, Y) !== undefined) return pane(X, Y, inWindow(X, Y), 0, x, y);
+      if (Y === -5 && CABIN.windows.some((middle) => Math.abs(X - middle) <= 7)) return PLANKS[0];   // the sills
+      if (Y === -4 && CABIN.windows.some((middle) => Math.abs(X - middle) <= 7)) return PLANKS[4];
+      return logs(X, Y, 0, (Y <= -18 ? 0.28 : Y === -17 ? 0.12 : 0) - X * 0.002, x, y);   // in the shade of the eaves at the top
+    };
+    const still = build(outsidePart, outsideStill);
+    // The four frames: the still picture with its windows and doorway (all in
+    // the bottom 20 rows) lit afresh.
+    const outside = [0, 1, 2, 3].map((f) => {
+      const frame = canvas(w, h);
+      const g = frame.getContext('2d');
+      g.drawImage(still, 0, 0);
+      for (let y = gy - 19; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const X = x - cx;
+          const Y = y - gy;
+          const middle = inWindow(X, Y);
+          let color = null;
+          if (middle !== undefined && corner(X, Y, 0) === null) color = pane(X, Y, middle, f, x, y);
+          else if (outsidePart(X, Y) === 4) color = doorway(X, Y, f, x, y);
+          if (!color) continue;
+          g.fillStyle = color;
+          g.fillRect(x, y, 1, 1);
+        }
+      }
+      return frame;
+    });
+
+    // The door: planks, two battens, iron hinges and a latch, swinging in on its
+    // left-hand hinges. Four frames from shut to wide open; the further it
+    // turns, the narrower and darker it looks, and its free edge goes back into
+    // the room, so up the picture. Drawn over the doorway (16 x 18).
+    const leafW = door * 2;
+    const leafH = 18;
+    const doors = [0, 35, 65, 90].map((degrees) => {
+      const turn = (degrees * Math.PI) / 180;
+      const width = Math.max(1.5, leafW * Math.cos(turn));
+      const back = leafW * Math.sin(turn);
+      return pixelCanvas(leafW, leafH, (x, y) => {
+        const t = (x + 0.5) / width;
+        if (t > 1) return null;
+        const bottom = leafH - 1 - Math.round(t * back);
+        if (y > bottom) return null;
+        if (x === 0 || x === Math.ceil(width) - 1 || y === bottom) return OUTLINE.bark;
+        const plank = Math.floor(t * 4);
+        const row = y + Math.round(t * back);   // where on the door itself this is
+        if (Math.floor(t * 4 + 0.02) !== Math.floor(t * 4 - 0.12) && degrees < 60) return PLANKS[4];   // the gaps between planks
+        if ((row === 3 || row === 13) && t < 0.45 && degrees < 80) return '#3a3a40';                    // hinges
+        if (row === 9 && t > 0.78 && t < 0.92 && degrees < 50) return '#d9b45a';                         // the latch
+        const batten = row === 3 || row === 4 || row === 13 || row === 14;
+        const shade = 0.3 + degrees / 150 + (batten ? -0.12 : 0) + (hash(plank, 0, 79) - 0.5) * 0.12 + (y % 5 === 0 ? 0.06 : 0);
+        return tone(PLANKS, shade, x, y);
+      });
+    });
+
+    // Four frames lit by the fire: the first painted whole, the others only
+    // where the light reaches (`area`), over a copy of the first.
+    const firelit = (partAt, colorAt, area) => {
+      const first = build(partAt, (X, Y, part, x, y) => colorAt(X, Y, part, x, y, 0));
+      return [first].concat([1, 2, 3].map((f) => {
+        const frame = canvas(w, h);
+        const g = frame.getContext('2d');
+        g.drawImage(first, 0, 0);
+        g.drawImage(build(partAt, (X, Y, part, x, y) => colorAt(X, Y, part, x, y, f), area), area.x, area.y);
+        return frame;
+      }));
+    };
+
+    // ---- inside ----
+    const floorAt = (X, Y) => X >= -half && X < half && Y >= -CABIN.depth && Y <= 0;   // under the walls too, so its edge never shows
+    // The firelight's reach across the floor and the walls, 0 to 1.
+    const glowAt = (X, Y, f) => Math.max(0, 1 - Math.hypot((X - CABIN.hearth) / (24 + f * 2), (Y + 41) / (13 + f)));
+    const floor = (X, Y, f, x, y) => {
+      if (X >= CABIN.hearth - 10 && X <= CABIN.hearth + 9 && Y >= -41 && Y <= -37) {
+        // The hearthstone, in two slabs.
+        if (X === CABIN.hearth || Y === -37) return FIELDSTONE[4];
+        return tone(FIELDSTONE, 0.35 - glowAt(X, Y, f) * 0.3 + (X > CABIN.hearth ? 0.1 : 0), x, y, false);
+      }
+      const board = Math.floor((-1 - Y) / 3);
+      const row = (-1 - Y) % 3;
+      const along = X + 40 + Math.floor(hash(board, 0, 80) * 23);
+      let shade = 0.32 + (hash(Math.floor(along / 23), board, 81) - 0.5) * 0.14 + (row === 2 ? 0.32 : 0) + (along % 23 === 0 ? 0.3 : 0) + (-Y) * 0.004;
+      const glow = glowAt(X, Y, f);
+      shade -= glow * 0.35;
+      if (glow > 0.78 && (x + y) % 2 === 0) return FIRELIGHT[3];
+      return tone(FLOOR, shade, x, y, false);
+    };
+    const insideFloor = firelit((X, Y) => (floorAt(X, Y) ? 1 : 0), (X, Y, part, x, y, f) => floor(X, Y, f, x, y),
+      { x: cx + CABIN.hearth - 30, y: gy - CABIN.depth, w: half - CABIN.hearth + 30, h: CABIN.depth - 24 });
+
+    // The walls from inside: the back wall's face and its top, the tops of the
+    // side walls, the hearth and the chimney above it.
+    const firebox = (X, Y) => Y >= -52 && Y <= -42 && X >= CABIN.hearth - 5 && X <= CABIN.hearth + 4
+      && !(Y === -52 && Math.abs(X + 0.5 - CABIN.hearth) > 2.5) && !(Y === -51 && Math.abs(X + 0.5 - CABIN.hearth) > 3.5);
+    const wallsPart = (X, Y) => {
+      if (X >= CABIN.chimney[0] && X <= CABIN.chimney[1] && Y >= -85 && Y <= -71) return 3;
+      if (X >= -half && X < half && Y >= -70 && Y <= -42) return 2;
+      if ((X >= -half && X < -half + 5) || (X >= half - 5 && X < half)) return Y >= -70 && Y <= -9 ? 2 : 0;
+      return 0;
+    };
+    // The fire: two logs glowing at the ends, and flames that leap and fall.
+    const fire = (X, Y, f, x, y) => {
+      const across = X - CABIN.hearth;
+      if (Y >= -43 && Math.abs(across + 0.5) <= 4) {
+        if (hash(X, Y, 82 + f) > 0.72) return '#ff7a2a';
+        return Y === -42 ? '#3a2014' : '#6a3a22';
+      }
+      const tall = Math.round((2 + 5 * hash(across, f, 83)) * (1 - Math.abs(across + 0.5) / 4.5));
+      const up = -44 - Y;
+      if (up >= 0 && up < tall && Math.abs(across + 0.5) < 4) {
+        const heat = up / Math.max(1, tall) + Math.abs(across + 0.5) * 0.12;
+        return heat < 0.35 ? FIRELIGHT[0] : heat < 0.65 ? FIRELIGHT[1] : heat < 0.9 ? FIRELIGHT[2] : FIRELIGHT[3];
+      }
+      return (-42 - Y) < 3 + f && (x + y) % 2 === 0 ? '#4a2216' : '#1a120e';
+    };
+    const walls = (X, Y, part, x, y, f) => {   // f: how bright the fire is, 0 to 3
+      if (part === 3) return chimney(X, Y, x, y);
+      const across = X - CABIN.hearth;
+      if (Math.abs(across + 0.5) <= 6 && Y < -60) return stones(X, Y, x, y, -42);                 // the chimney breast
+      const sideTop = X < -half + 5 || X >= half - 5;
+      if (sideTop && Y > -66) {
+        // The top of a side wall, its log seen from above.
+        const across = X < 0 ? X + half : half - 1 - X;
+        return tone(PLANKS, [0.62, 0.25, 0.12, 0.2, 0.5][across] + (hash(x, y, 84) < 0.08 ? 0.15 : 0), x, y, false);
+      }
+      if (Y <= -66) {
+        // The top of the back wall.
+        return tone(PLANKS, [0.5, 0.15, 0.1, 0.22, 0.62][Y + 70] + (hash(x, y, 85) < 0.08 ? 0.15 : 0), x, y, false);
+      }
+      if (firebox(X, Y)) return fire(X, Y, f, x, y);
+      if (Math.abs(across + 0.5) <= 9 && Y >= -60) return stones(X, Y, x, y, -42);                // the hearth
+      const glow = Math.max(0, 1 - Math.hypot(across / (22 + f * 2), (Y + 46) / 16));
+      return logs(X, Y, -42, 0.2 - glow * 0.3, x, y);
+    };
+    const insideWalls = firelit(wallsPart, walls, { x: cx + CABIN.hearth - 28, y: gy - 62, w: half - CABIN.hearth + 28, h: 21 });
+
+    // What stands in front of the room once the roof is off: the lowest two logs
+    // of the front wall, cut off level, with the doorway and its sill.
+    const sillPart = (X, Y) => {
+      if (Y < -8 || Y > 0) return 0;
+      if (X >= -door - 1 && X <= door) return X === -door - 1 || X === door ? 2 : Y >= -1 ? 2 : 0;
+      if (X >= -half && X < half) return 2;
+      return Y >= -7 && corner(X, Y, 0) ? 2 : 0;
+    };
+    const sill = build(sillPart, (X, Y, part, x, y) => {
+      if (X === -door - 1 || X === door) return PLANKS[3];
+      if (Math.abs(X + 0.5) <= door) return Y === -1 ? PLANKS[1] : PLANKS[3];
+      const end = corner(X, Y, 0);
+      if (end && end !== 'log') return cornerColor[end];
+      if (Y === -8) return tone(PLANKS, 0.15 + (hash(x, y, 86) < 0.1 ? 0.15 : 0), x, y, false);
+      return logs(X, Y, 0, -0.04, x, y);
+    });
+
+    // The table, against the left-hand wall, with a candle on it: drawn from the
+    // middle of its front legs on the floor (18 x 22).
+    const tw = 18;
+    const th = 22;
+    const table = [0, 1, 2, 3].map((f) => {
+      const c = canvas(tw, th);
+      const g = c.getContext('2d');
+      const dot = (tx, ty, color) => { g.fillStyle = color; g.fillRect(tx + 9, ty + th - 1, 1, 1); };
+      for (const tx of [-5, 5]) for (let ty = -9; ty <= -6; ty++) dot(tx, ty, PLANKS[4]);   // the back legs
+      for (const [tx, color] of [[-7, OUTLINE.bark], [-6, PLANKS[1]], [6, PLANKS[2]], [7, OUTLINE.bark]]) {
+        for (let ty = -9; ty <= 0; ty++) dot(tx, ty, color);
+      }
+      // The top: boards running across, lit by the candle round its foot.
+      for (let ty = -17; ty <= -10; ty++) {
+        for (let tx = -8; tx <= 8; tx++) {
+          let color;
+          if (ty === -17 || tx === -8 || tx === 8 || ty === -10) color = OUTLINE.bark;
+          else if (ty === -11) color = PLANKS[3];
+          else {
+            const glow = Math.max(0, 1 - Math.hypot(tx - 2.5, (ty + 14) * 1.6) / (4 + f));
+            color = glow > 0.55 && (tx + ty) % 2 === 0 ? FIRELIGHT[1] : tone(PLANKS, 0.2 + (ty % 2 === 0 ? 0.1 : 0) - glow * 0.25, tx + 9, ty);
+          }
+          dot(tx, ty, color);
+        }
+      }
+      // The candle in its dish, and its flame, which leans and stretches.
+      for (const tx of [1, 2, 3, 4]) dot(tx, -14, '#8a8a96');
+      for (let ty = -18; ty <= -15; ty++) { dot(2, ty, '#f4ead0'); dot(3, ty, '#d8c8a0'); }
+      const lean = [0, 0, 1, 0][f];
+      dot(2 + lean, -19, FIRELIGHT[0]);
+      dot(2 + lean, -20, FIRELIGHT[1]);
+      if (f >= 2) dot(2 + lean, -21, FIRELIGHT[2]);
+      return c;
+    });
+
+    // Smoke: soft round puffs, lit from the top left, from small to big.
+    const puffs = [1, 2, 3, 4].map((r) => pixelCanvas(2 * r + 1, 2 * r + 1, (x, y) => {
+      const dx = x - r;
+      const dy = y - r;
+      if (dx * dx + dy * dy > r * r + r * 0.6) return null;
+      const lit = dx + dy;
+      return lit < -r * 0.5 ? '#f6f6f8' : lit < r * 0.6 ? '#e0e0e6' : '#c2c2cc';
+    }));
+
+    return {
+      outside, doors, insideFloor, insideWalls, sill, table, puffs,
+      // Where things are, from the middle of the foot of the front wall (the
+      // prop's spot): the walls on the ground, the doorway in the picture, the
+      // top of the chimney, the fire, the table and the golden acorn under it.
+      house: {
+        half, depth: CABIN.depth, thick: CABIN.thick, ends, door,
+        doorway: { x: cx - door, y: gy - 17 },
+        chimney: { dx: (CABIN.chimney[0] + CABIN.chimney[1]) / 2 + 0.5, dy: -87 },
+        hearth: { dx: CABIN.hearth, dy: -40 },
+        table: { dx: CABIN.table.x, dy: CABIN.table.y },
+        golden: { dx: CABIN.table.x, dy: CABIN.table.y - 3 },
+      },
+    };
+  }
+
   // ---- the catalogue ----
 
   // Where a bird could sit on a tree: the middle of the top row of a frame, as
@@ -671,6 +1043,15 @@ const Scenery = (() => {
     hides: true, flows: true, shadow: [196, 26], falls: peak.falls,
     foot: { dx: MOUNTAIN.mx - (MOUNTAIN.w >> 1), dy: MOUNTAIN.my - MOUNTAIN.h, shape: mountainShape },
   });
+  // The log cabin. Its frames are the outside, which flickers with the fire;
+  // the game draws the rest in layers (the door, and with the roof off the
+  // floor, the walls, the table and the front sill), and its smoke. `house`
+  // says where its walls, doorway, chimney, fire, table and golden acorn are.
+  const cabin = logCabin();
+  define('cabin', cabin.outside, {
+    hides: true, flickers: true, shadow: [104, 10], house: cabin.house,
+    doors: cabin.doors, insideFloor: cabin.insideFloor, insideWalls: cabin.insideWalls, sill: cabin.sill, table: cabin.table, puffs: cabin.puffs,
+  });
 
   // Which frame of a prop shows for a given wind strength.
   function frameIndex(art, lean) {
@@ -682,9 +1063,10 @@ const Scenery = (() => {
   const FLOW_FRAMES_PER_SECOND = 6;
   const flowFrame = (clock) => Math.floor(clock * FLOW_FRAMES_PER_SECOND) % 4;
 
-  // The frame of a prop to draw for a given wind strength; running water goes by the clock.
+  // The frame of a prop to draw for a given wind strength; running water and firelight go by the clock.
   function frame(art, lean, clock = 0) {
     if (art.flows) return art.frames[flowFrame(clock)];
+    if (art.flickers) return art.frames[flicker(clock)];
     return art.frames[frameIndex(art, lean)];
   }
 
@@ -712,15 +1094,18 @@ const Scenery = (() => {
       }
     }
 
-    // The dirt paths: how far each pixel near one is from its line, worked out once.
+    // The dirt paths: how far each pixel near one is from its line, worked out
+    // once. A narrower path (the cabin's) counts as if its line were further
+    // off, so its edge comes out just like theirs.
     const paths = level.paths || [];
     const pathAway = new Float32Array(size * size).fill(Infinity);
     for (const path of paths) {
       const reach = path.half + 4;
+      const narrower = paths[0].half - path.half;
       for (const point of path.points) {
         for (let y = Math.max(0, Math.floor(point.y - reach)); y <= Math.min(size - 1, Math.ceil(point.y + reach)); y++) {
           for (let x = Math.max(0, Math.floor(point.x - reach)); x <= Math.min(size - 1, Math.ceil(point.x + reach)); x++) {
-            const d = Math.hypot(x + 0.5 - point.x, y + 0.5 - point.y);
+            const d = Math.hypot(x + 0.5 - point.x, y + 0.5 - point.y) + narrower;
             if (d < pathAway[x + y * size]) pathAway[x + y * size] = d;
           }
         }
@@ -969,6 +1354,7 @@ const Scenery = (() => {
     props,
     frame,
     flowFrame,
+    flicker,
     top,
     buildGround,
     buildPond,
