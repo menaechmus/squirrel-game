@@ -101,9 +101,9 @@ body {
   image-rendering: pixelated;
 }
 
-/* Two players (1.13): the boxes for a name and a code, the code itself, and
-   the squirrels' heads in the top bar. A box's text is at least 16px, so a
-   phone does not zoom in on it. */
+/* Games with friends (1.13): the boxes for a name and a code, the code itself,
+   and the squirrels' heads in the top bar. A box's text is at least 16px, so
+   a phone does not zoom in on it. */
 .panel .field {
   display: flex;
   flex-direction: column;
@@ -147,7 +147,7 @@ body {
   color: #ffc4a8;
 }
 
-/* "3, 2, 1, Go!" before a two-player round. */
+/* "3, 2, 1, Go!" before a round with friends. */
 #countdown {
   position: absolute;
   top: 38%;
@@ -176,6 +176,46 @@ body {
   vertical-align: -2px;
   image-rendering: crisp-edges;
   image-rendering: pixelated;
+}
+
+/* With three or four players (1.14), the others' counts on a row of their own
+   under the top bar, at the left: the top bar has no room for four on a
+   narrow phone. It sits just under the row of buttons (32px tall). */
+#others {
+  position: absolute;
+  top: calc(48px + env(safe-area-inset-top));
+  left: calc(14px + env(safe-area-inset-left));
+  display: flex;
+  gap: clamp(8px, 3vmin, 16px);
+  white-space: nowrap;
+  text-shadow: 2px 2px 0 #000;
+}
+
+/* Who is in the game, on the panel, each beside their squirrel's head. */
+#duo-players {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#duo-players li {
+  white-space: nowrap;
+}
+
+#duo-players li.away {
+  opacity: 0.5;
+}
+
+#duo-players .head {
+  display: inline-block;
+  width: 20px;
+  height: 16px;
+  margin-right: 6px;
+  vertical-align: -2px;
 }
 
 #mute.off .waves,

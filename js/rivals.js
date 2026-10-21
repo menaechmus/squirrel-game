@@ -8,7 +8,7 @@
 //   level, player, acorns() -> list, take(acorn, who), random(), sound(name, at),
 //   view() -> the part of the park on screen, as { x, y, w, h },
 //   and optionally thieves: false, which leaves the jay, the groundhog thief and
-//   the grey squirrels out and keeps only the wildlife for show (two-player games),
+//   the grey squirrels out and keeps only the wildlife for show (games with friends),
 //   puff(spot) -> throw up a little dirt there,
 //   wind(x, y) -> how hard the wind is pushing there, as Effects.lean gives it
 

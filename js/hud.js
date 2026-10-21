@@ -62,7 +62,7 @@ const Hud = (() => {
 
   // Draw the minimap: the miniature, a frame round the part of the park that
   // is on screen (`view`, in park pixels), and a pulsing dot for the squirrel.
-  // `others` are the other players' squirrels (two-player games), { x, y,
+  // `others` are the other players' squirrels (games with friends), { x, y,
   // color }: a steady dot in each one's colour, with a light rim.
   function drawMinimap(g, miniature, level, player, view, clock, others = []) {
     const cell = level.size / MINIMAP_SIZE;

@@ -1,34 +1,50 @@
-// Two players on their own phones (1.13): who is playing, the messages
-// between the host's phone and the guest's, and the other squirrel drawn
-// smoothly from the positions it sends. The host's phone keeps the race (the
-// acorns, the clock, who got what); game.js does that. This file only checks
-// who sent what and passes it on, as WordGridGame's wifi.js does. The links
-// come from net.js.
+// Friends on their own phones (1.13; up to four players since 1.14): who is
+// playing, the messages between the host's phone and each of the others, and
+// the other squirrels drawn smoothly from the positions they send. The host's
+// phone keeps the race (the acorns, the clock, who got what); game.js does
+// that. This file only checks who sent what and passes it on, as
+// WordGridGame's wifi.js does. Each guest is linked to the host's phone only,
+// so the host passes each one's position on to the rest. The links come from
+// net.js.
 //
 // Messages are objects { t, ... }:
 //   guest to host   hello { name, token, version }, me { s, x, y, f, m, e, h },
 //                   view { w, h }, ready, took { id, s }, golden { s }, pause, resume, bye
-//   host to guest   lobby { host, guest }, round { ... },
-//                   tick { s, x, y, f, m, time, p, b, q },
+//   host to guest   lobby { seat, players }, round { ... },
+//                   tick { s, x, y, f, m, time, p, b, w, q }, pos { seat, s, x, y, f, m },
 //                   taken { id, by }, grown { id, x, y }, golden { by },
-//                   end { counts, time }, denied { why, version }, closed { why }
-// `s` is the sender's clock in seconds, so the other side can place each
-// position in time however late it arrives, and tell which squirrel reached
-// an acorn first. The guest's `e` and `h` hand back the host's latest `s`
-// and how long ago it came, so the host can time the round trip.
+//                   end { hauls, time }, denied { why, version }, closed { why }
+// A seat is 0 for the host and 1 to 3 for the others, taken in the order they
+// come; each seat has its own squirrel's coat. `s` is the sender's clock in
+// seconds, so the other side can place each position in time however late it
+// arrives, and tell which squirrel reached an acorn first. The guest's `e`
+// and `h` hand back the host's latest `s` and how long ago it came, so the
+// host can time the round trip.
 
 const Duo = (() => {
+  const MAX_PLAYERS = 4;
   const NAME_LENGTH = 12;
-  const BEHIND = 0.1;      // the other squirrel is drawn this many seconds in the past
-  const CARRY_ON = 0.15;   // and carried on along its way at most this long when messages stall
+  const BEHIND = 0.1;      // the other squirrels are drawn this many seconds in the past
+  const CARRY_ON = 0.15;   // and carried on along their way at most this long when messages stall
   const FACINGS = ['up', 'down', 'left', 'right'];
 
   // A name as typed: single spaces, trimmed, no longer than the box allows.
   const cleanName = (text) => String(text == null ? '' : text).replace(/\s+/g, ' ').trim().slice(0, NAME_LENGTH);
 
+  // "Sam" a second time becomes "Sam 2", so that every name on the screen is
+  // one person (WordGridGame's way).
+  function uniqueName(name, taken) {
+    const used = new Set(taken.map((other) => other.toLowerCase()));
+    if (!used.has(name.toLowerCase())) return name;
+    for (let n = 2; ; n++) {
+      const candidate = `${name.slice(0, NAME_LENGTH - String(n).length - 1)} ${n}`;
+      if (!used.has(candidate.toLowerCase())) return candidate;
+    }
+  }
+
   const isNumber = (value) => typeof value === 'number' && isFinite(value);
 
-  // A position from the other phone, rebuilt from only what it should hold, or null.
+  // A position from another phone, rebuilt from only what it should hold, or null.
   function cleanSpot(message) {
     if (!isNumber(message.s) || !isNumber(message.x) || !isNumber(message.y)) return null;
     return { s: message.s, x: message.x, y: message.y, facing: FACINGS.includes(message.f) ? message.f : 'down', moving: Boolean(message.m) };
@@ -52,24 +68,31 @@ const Duo = (() => {
 
   // Why the host turned this phone away, in words.
   function deniedText({ why, version }, ours) {
-    if (why === 'version') return `This phone has version ${ours} of the game and the other has ${version}. Reload the page on the older one, then join again.`;
-    if (why === 'full') return 'That game already has two players.';
+    if (why === 'version') return `This phone has version ${ours} of the game and the host's has ${version}. Reload the page on the older one, then join again.`;
+    if (why === 'full') return 'That game already has four players.';
     return 'Type your name first.';
   }
 
   // ---- the host ----
 
-  // The host waits for one guest. onjoin({ name, back }) hears it arrive, or
-  // come back after its link dropped; onleave({ left }) hears it go, `left`
-  // true if it said goodbye rather than losing its link; onmessage(message)
-  // hears what it sends, cleaned (see cleanFromGuest). Before a game starts a
-  // guest that goes loses its place; once one has started, its place is kept
-  // for it, and it is known again by the token its tab keeps.
+  // The host keeps the seats: its own (0) and up to three others, each taking
+  // the lowest seat free. onjoin({ seat, name, back }) hears a phone arrive, or
+  // come back after its link dropped; onleave({ seat, name, left }) hears one
+  // go, `left` true if it said goodbye rather than losing its link;
+  // onmessage(seat, message) hears what each sends, cleaned (see
+  // cleanFromGuest). Before a game starts a phone that goes loses its seat;
+  // once one has started, a seat whose phone dropped out is kept for it, and
+  // the phone is known again by the token its tab keeps. One that says
+  // goodbye gives its seat up.
   function createHost({ name, version, onjoin = () => {}, onleave = () => {}, onmessage = () => {} }) {
-    let guest = null;   // { name, token, link }
+    const seats = [{ name, token: null, link: null }];   // { name, token, link } or null
+    while (seats.length < MAX_PLAYERS) seats.push(null);
     let started = false;
     let ended = false;
 
+    const seatOf = (link) => seats.findIndex((seat, i) => i > 0 && seat && seat.link === link);
+
+    // The guest hangs up once it has read why; this is in case it does not.
     function deny(link, why) {
       link.send({ t: 'denied', why, version });
       setTimeout(() => link.close(), 3000);
@@ -80,23 +103,27 @@ const Duo = (() => {
       const token = typeof message.token === 'string' ? message.token.slice(0, 40) : '';
       if (message.version !== version) return deny(link, 'version');
       if (!who || !token) return deny(link, 'name');
-      if (guest && guest.token !== token && (guest.link || started)) return deny(link, 'full');
-      const back = Boolean(guest && guest.token === token);
-      const old = guest && guest.link;
-      // "Sam" playing "Sam" becomes "Sam 2", so the two can be told apart.
-      const named = back ? guest.name : who.toLowerCase() === name.toLowerCase() ? `${who.slice(0, NAME_LENGTH - 2)} 2` : who;
-      guest = { name: named, token, link };
+      let seat = seats.findIndex((other, i) => i > 0 && other && other.token === token);
+      const back = seat > 0;
+      if (!back) {
+        seat = seats.findIndex((other, i) => i > 0 && !other);
+        if (seat < 0) return deny(link, 'full');
+        seats[seat] = { name: uniqueName(who, seats.filter(Boolean).map((other) => other.name)), token, link: null };
+      }
+      const old = seats[seat].link;
+      seats[seat].link = link;
       if (old && old !== link) {
         old.onclose = null;
         old.close();
       }
       link.onmessage = (next) => heard(link, next);
       link.onclose = () => dropped(link, false);
-      onjoin({ name: named, back });
+      onjoin({ seat, name: seats[seat].name, back });
     }
 
     function heard(link, message) {
-      if (!guest || guest.link !== link || ended) return;
+      const seat = seatOf(link);
+      if (seat < 0 || ended) return;
       if (message.t === 'bye') {
         link.onclose = null;
         link.close();
@@ -104,14 +131,16 @@ const Duo = (() => {
         return;
       }
       const clean = cleanFromGuest(message);
-      if (clean) onmessage(clean);
+      if (clean) onmessage(seat, clean);
     }
 
     function dropped(link, left) {
-      if (!guest || guest.link !== link) return;
-      guest.link = null;
-      if (!started || left) guest = null;
-      onleave({ left });
+      const seat = seatOf(link);
+      if (seat < 0) return;
+      const who = seats[seat].name;
+      seats[seat].link = null;
+      if (!started || left) seats[seat] = null;
+      onleave({ seat, name: who, left });
     }
 
     const host = {
@@ -127,32 +156,51 @@ const Duo = (() => {
         };
         link.onclose = () => {};
       },
-      get guest() {
-        return guest && { name: guest.name, here: Boolean(guest.link) };
-      },
-      // Whether a game is on: from then on a guest that drops keeps its place.
+      // Each seat as { name, here }, or null when nobody has it.
+      players: () => seats.map((seat, i) => seat && { name: seat.name, here: i === 0 || Boolean(seat.link) }),
+      // The seats whose phones are linked now.
+      linked: () => seats.map((seat, i) => (i > 0 && seat && seat.link ? i : 0)).filter(Boolean),
+      // Whether a game is on: from then on a phone that drops keeps its seat.
       setStarted(on) {
         started = on;
       },
+      // To every phone linked, to the one in `seat`, or to all but that one.
       send(message) {
-        if (guest && guest.link) guest.link.send(message);
+        for (const seat of seats) if (seat && seat.link) seat.link.send(message);
       },
-      // Ends the two-player game for the guest too.
+      sendTo(seat, message) {
+        const held = seats[seat];
+        if (seat > 0 && held && held.link) held.link.send(message);
+      },
+      sendOthers(seat, message) {
+        seats.forEach((held, i) => {
+          if (i !== seat && held && held.link) held.link.send(message);
+        });
+      },
+      // Who sits where, to every phone, each told its own seat.
+      sendLobby() {
+        const players = host.players();
+        seats.forEach((held, i) => {
+          if (held && held.link) held.link.send({ t: 'lobby', seat: i, players });
+        });
+      },
+      // Ends the game for everyone.
       close(why = 'ended') {
         ended = true;
-        if (guest && guest.link) {
-          const { link } = guest;
+        for (const seat of seats) {
+          const link = seat && seat.link;
+          if (!link) continue;
+          seat.link = null;
           link.onclose = null;
           link.send({ t: 'closed', why });
           setTimeout(() => link.close(), 500);
         }
-        guest = null;
       },
     };
     return host;
   }
 
-  // ---- the guest ----
+  // ---- a guest ----
 
   // connect() gives a link to the host (net.js joinRoom). join() resolves
   // when the host first answers, or rejects with an error whose message can
@@ -190,7 +238,7 @@ const Duo = (() => {
         answered();
       } else if (message.t === 'denied' || message.t === 'closed') {
         const first = Boolean(waiting);
-        answered(new Error(message.t === 'denied' ? deniedText(message, version) : 'The other player ended the game.'));
+        answered(new Error(message.t === 'denied' ? deniedText(message, version) : 'The host ended the game.'));
         guest.stop();
         if (first) return;
       }
@@ -221,7 +269,7 @@ const Duo = (() => {
           up = false;
           onlink(false);
         }
-        if (waiting) answered(new Error('Lost touch with the other phone. Try again.'));
+        if (waiting) answered(new Error('Lost touch with the host. Try again.'));
         else again();
       };
       link.send({ t: 'hello', name, token, version });
@@ -263,9 +311,9 @@ const Duo = (() => {
     return guest;
   }
 
-  // ---- the other squirrel, smoothly ----
+  // ---- another squirrel, smoothly ----
 
-  // Each position comes stamped with the other phone's clock (`s`). How far
+  // Each position comes stamped with the sending phone's clock (`s`). How far
   // that clock is behind this phone's is worked out from the quickest recent
   // arrivals, so a message that comes late is still placed when it was sent.
   // The squirrel is drawn BEHIND seconds in the past, between the two
@@ -312,5 +360,5 @@ const Duo = (() => {
     };
   }
 
-  return { NAME_LENGTH, cleanName, cleanSpot, deniedText, createHost, createGuest, follower };
+  return { MAX_PLAYERS, NAME_LENGTH, cleanName, cleanSpot, deniedText, createHost, createGuest, follower };
 })();

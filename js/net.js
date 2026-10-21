@@ -1,7 +1,8 @@
-// Connections between two phones (1.13). One phone opens a room under a
-// four-letter code and the other joins it. Each connection is a *link* that
-// carries plain objects both ways as JSON text. Nothing here knows the game.
-// It is WordGridGame's net.js, as a classic script.
+// Connections between phones (1.13). One phone opens a room under a
+// four-letter code and the others join it (up to three, since 1.14). Each
+// connection is a *link* that carries plain objects both ways as JSON text.
+// Nothing here knows the game. It is WordGridGame's net.js, as a classic
+// script.
 //
 // The phones find each other through PeerJS (js/vendor/peerjs.min.js, MIT
 // licence): its free cloud server passes the connection details between
@@ -36,7 +37,7 @@ const Net = (() => {
   };
 
   // Every link still open, so that leaving the page hangs them all up at once
-  // and the other phone hears of it straight away.
+  // and the other phones hear of it straight away.
   const live = new Set();
   window.addEventListener('pagehide', () => {
     for (const link of [...live]) link.close();
@@ -92,11 +93,11 @@ const Net = (() => {
   }
 
   const failure = (message) => Object.assign(new Error(message), { friendly: true });
-  const NO_GAME = 'No game has that code. Check the letters on the other phone.';
+  const NO_GAME = 'No game has that code. Check the letters on the host\'s phone.';
   const NO_SERVER = 'Could not reach the server that connects phones. Check the internet connection.';
-  const NO_HOST = 'Could not reach the other phone. Check the internet connection on both, and try again.';
+  const NO_HOST = 'Could not reach the host\'s phone. Check the internet connection on both, and try again.';
 
-  // Opens a room for the other phone to join, under a new code. onlink(link)
+  // Opens a room for the other phones to join, under a new code. onlink(link)
   // hears of each phone that joins. Resolves to { code, close() } once it can
   // be found.
   async function openRoom({ code = null, onlink }) {

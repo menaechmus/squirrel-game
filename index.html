@@ -8,7 +8,7 @@
 <!-- The version appears in the About panel and as ?v= on every file below.
      Change them all together for each release, so a browser holding old
      files fetches a matching new set. -->
-<link rel="stylesheet" href="style.css?v=1.13">
+<link rel="stylesheet" href="style.css?v=1.14">
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -22,6 +22,7 @@
   </div>
   <canvas id="minimap" width="48" height="48" aria-label="Map of the park"></canvas>
   <span id="golden" hidden title="The golden acorn"></span>
+  <span id="others" hidden aria-hidden="true"></span>
 </div>
 
 <div id="stick" hidden><div id="knob"></div></div>
@@ -36,13 +37,13 @@
     <button id="play" type="button" autofocus>Race</button>
     <button id="explore" type="button">Explore</button>
   </div>
-  <button id="two" type="button" class="small">Two players</button>
+  <button id="two" type="button" class="small">Play with friends</button>
   <button id="howto" type="button" class="small">How to play</button>
 </div>
 
 <div id="duo" class="panel" hidden>
-  <h1>Two players</h1>
-  <p class="dim">Race a friend on two phones or computers. One of you hosts; the other joins with the code.</p>
+  <h1>Play with friends</h1>
+  <p class="dim">Race up to three friends, each on their own phone or computer. One of you hosts; the others join with the code.</p>
   <label id="duo-name-row" class="field">Your name
     <input id="duo-name" type="text" maxlength="12" autocomplete="nickname" spellcheck="false">
   </label>
@@ -53,7 +54,10 @@
   <div id="duo-hosting" class="stack" hidden>
     <p>Your code: <b id="duo-code" class="code">....</b></p>
     <button id="duo-share" type="button" class="small" hidden>Share link</button>
-    <p id="duo-friend" class="dim">Waiting for a friend to join...</p>
+  </div>
+  <ul id="duo-players" hidden></ul>
+  <div id="duo-starting" class="stack" hidden>
+    <p id="duo-friend" class="dim">Waiting for friends to join...</p>
     <div class="choices">
       <button id="duo-race" type="button" disabled>Race</button>
       <button id="duo-explore" type="button" disabled>Explore</button>
@@ -85,8 +89,8 @@
 
 <div id="about" class="panel" hidden>
   <h1>Squirrel Game</h1>
-  <p id="version">Version 1.13 &middot; 21 October 2026</p>
-  <p class="dim">New in this version: two players, each on their own phone or computer. Race each other for the acorns, or explore together.</p>
+  <p id="version">Version 1.14 &middot; 21 October 2026</p>
+  <p class="dim">New in this version: play with up to three friends, each on their own phone or computer. Friends can join part-way through, and if someone leaves, the rest play on.</p>
   <button id="close-about" type="button">Close</button>
 </div>
 
@@ -116,23 +120,24 @@
     <p>Blinking arrows at the edge of the screen point to the nearest acorns, and the map in the corner shows where you are.</p>
     <p>The stream can only be crossed on the log bridges.</p>
     <p>A golden acorn is hidden somewhere in the park. It doesn't count in the race, but see if you can find it.</p>
-    <h2>Two players</h2>
-    <p>Play a friend on two phones or computers. Both press <b>Two players</b> and type a name. One presses <b>Host a game</b> and gets a four-letter code; the other presses <b>Join a game</b> and types it in, or opens the link the host shares. The host picks Race or Explore.</p>
-    <p>The internet is needed to connect; after that the two talk directly. Each of you sees your own squirrel, and the other one on screen and on the map. There are no thieves in a two-player game. Pausing on either pauses both, and so does switching away from the game.</p>
+    <h2>Playing with friends</h2>
+    <p>Play with up to three friends, each on their own phone or computer. Everyone presses <b>Play with friends</b> and types a name. One presses <b>Host a game</b> and gets a four-letter code; the others press <b>Join a game</b> and type it in, or open the link the host shares. The host picks Race or Explore.</p>
+    <p>The internet is needed to connect; after that the phones talk directly. Each squirrel has its own colour, and you see the others on screen and on the map. There are no thieves when you play with friends. Pausing on any phone pauses them all, and so does switching away from the game.</p>
+    <p>A friend can join part-way through a round, starting at the crossing. If someone leaves, the rest play on.</p>
   </div>
   <button id="close-rules" type="button">Close</button>
 </div>
 
-<script src="js/sprites.js?v=1.13"></script>
-<script src="js/scenery.js?v=1.13"></script>
-<script src="js/effects.js?v=1.13"></script>
-<script src="js/level.js?v=1.13"></script>
-<script src="js/input.js?v=1.13"></script>
-<script src="js/hud.js?v=1.13"></script>
-<script src="js/rivals.js?v=1.13"></script>
-<script src="js/sound.js?v=1.13"></script>
-<script src="js/net.js?v=1.13"></script>
-<script src="js/duo.js?v=1.13"></script>
-<script src="js/game.js?v=1.13"></script>
+<script src="js/sprites.js?v=1.14"></script>
+<script src="js/scenery.js?v=1.14"></script>
+<script src="js/effects.js?v=1.14"></script>
+<script src="js/level.js?v=1.14"></script>
+<script src="js/input.js?v=1.14"></script>
+<script src="js/hud.js?v=1.14"></script>
+<script src="js/rivals.js?v=1.14"></script>
+<script src="js/sound.js?v=1.14"></script>
+<script src="js/net.js?v=1.14"></script>
+<script src="js/duo.js?v=1.14"></script>
+<script src="js/game.js?v=1.14"></script>
 </body>
 </html>

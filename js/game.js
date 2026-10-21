@@ -17,15 +17,17 @@
   const DOOR_NEAR = 28;        // the cabin's door opens when the squirrel is this close to it
   const DOOR_SWING = [0.25, 0.45];   // seconds the door takes to swing open, and to shut
   const ROOF_FADE = 0.25;      // seconds the cabin's roof takes to lift off, or come back
-  // Two players (1.13).
-  const NAME_KEY = 'squirrel-game-name';     // the name typed for two-player games, kept on the phone
+  // Games with friends (1.13; up to four players since 1.14).
+  const NAME_KEY = 'squirrel-game-name';     // the name typed for games with friends, kept on the phone
   const TOKEN_KEY = 'squirrel-game-token';   // this tab, kept per tab, so the host knows it again after a drop
-  const SEND_EVERY = 0.05;   // seconds between the positions each phone sends the other
-  const QUIET = 2;           // seconds without a word from the other phone before the game waits for it
-  const START_APART = 8;     // the two squirrels start this far either side of the crossing
-  const COUNTDOWN = 3;       // seconds of "3, 2, 1" before a two-player round, so both phones say Go together
-  const COAT_COLORS = ['#d0702c', '#4f4842'];   // the host's squirrel and the guest's, for the map and the top bar
-  // A squirrel's head for the top bar in a two-player game, 10 by 8 pixels:
+  const SEND_EVERY = 0.05;   // seconds between the positions each phone sends
+  const QUIET = 2;           // seconds without a word from a phone before the game waits for it
+  const START_SPOTS = [-8, 8, -24, 24];   // where each seat's squirrel starts, left or right of the crossing
+  const COUNTDOWN = 3;       // seconds of "3, 2, 1" before a round with friends, so every phone says Go together
+  // Each seat's squirrel, for the map, the top bar and the panel: the host's
+  // orange, then black, white and brown.
+  const COAT_COLORS = ['#d0702c', '#4f4842', '#ece6da', '#83532f'];
+  // A squirrel's head for the top bar in a game with friends, 10 by 8 pixels:
   // '#' its coat, '+' a light rim, 'e' its eyes.
   const HEAD = ['.+......+.', '+#+....+#+', '+##++++##+', '+########+', '+#e####e#+', '+########+', '.+######+.', '..++++++..'];
   // The pause button's picture: two upright bars, 14 by 10 pixels like the speaker.
@@ -69,28 +71,26 @@
     }
     : null;
   const random = seededRandom(params.has('seed') ? Number(params.get('seed')) : auto ? 1 : Date.now());
-  const reportsWanted = params.has('report');   // the two-player test page wants to hear how things stand
-  // This copy's version, from the About panel: in a two-player game both phones
-  // need the same one, as both build the park from the same seed. (The test
-  // page can pretend otherwise, with &version.)
+  const reportsWanted = params.has('report');   // the test page for games with friends wants to hear how things stand
+  // This copy's version, from the About panel: in a game with friends every
+  // phone needs the same one, as each builds the park from the same seed.
+  // (The test page can pretend otherwise, with &version.)
   const VERSION = Net.testing && params.has('version') ? params.get('version') : (el('version').textContent.match(/Version ([\d.]+)/) || [])[1] || '';
 
   const player = { x: level.spawn.x, y: level.spawn.y, facing: 'down', moving: false, hop: 0, idle: 0, sniffRound: -1, joy: 0 };
-  const counts = { you: 0, jays: 0, groundhogs: 0, squirrels: 0, friend: 0 };   // `friend`: the other player, in a two-player game
-  // The other player's squirrel in a two-player game, as drawn on this phone.
-  const friend = { x: 0, y: 0, facing: 'down', moving: false, hop: 0, idle: 0, joy: 0, seen: false };
-  let duo = null;       // a two-player game (see "two players" below), or null
+  const counts = { you: 0, jays: 0, groundhogs: 0, squirrels: 0 };   // the other players' are in `duo.hauls`
+  let duo = null;       // a game with friends (see "games with friends" below), or null
   let state = 'menu';   // 'menu' | 'playing' | 'over'
   let mode = 'race';    // 'race': the park empties and the round ends; 'explore': acorns grow back, no clock
   let paused = false;
   let growing = [];     // in Explore, when each taken acorn grows back (seconds of `time`)
   let nextPhase = 0;    // each acorn bobs a little out of step with the rest
   let nextId = 0;       // each acorn has an id, so two phones can talk about it
-  let readyIn = 0;      // seconds of the countdown left before a two-player round begins (Infinity: not yet known)
+  let readyIn = 0;      // seconds of the countdown left before a round with friends begins (Infinity: not yet known)
   let helpFrom = null;  // the panel the help was opened from, to go back to
   let door = 0;         // the cabin's door: 0 shut, 1 wide open
   let indoors = 0;      // 0 with the cabin's roof on, 1 with it lifted off (the squirrel inside)
-  let golden = null;    // who found the golden acorn this round: null, 'you', or 'friend' (the other player)
+  let golden = null;    // who found the golden acorn this round: null, 'you', or 'friend' (another player: `duo.goldenSeat`)
   let acorns = [];
   let particles = [];
   let time = 0;
@@ -100,14 +100,15 @@
   // Where the HUD sits, in game pixels, so hint arrows can keep clear of it.
   let hudBottom = 0;
   let minimapBox = { left: 0, top: 0, right: 0, bottom: 0 };
+  let othersBox = null;   // the others' counts under the top bar, with three or four players
   const sounds = Sound.create();
 
   const world = {
     level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView, puff,
     wind: (x, y) => effects.lean(x, y, clock),
   };
-  // One player has the thieves to contend with; two players race each other,
-  // with only the wildlife for show about.
+  // One player has the thieves to contend with; friends race each other, with
+  // only the wildlife for show about.
   const rivalsAlone = Rivals.create(world);
   const rivalsTogether = Rivals.create(Object.assign({}, world, { thieves: false }));
   let rivals = rivalsAlone;
@@ -144,6 +145,11 @@
     minimapBox = {
       left: Math.min(map.left, icon.left) * perCssPixel, top: map.top * perCssPixel,
       right: Math.max(map.right, icon.right) * perCssPixel, bottom: Math.max(map.bottom, icon.bottom) * perCssPixel,
+    };
+    // With three or four players, arrows keep clear of the others' counts too.
+    const others = el('others').getBoundingClientRect();
+    othersBox = el('others').hidden ? null : {
+      left: others.left * perCssPixel, top: others.top * perCssPixel, right: others.right * perCssPixel, bottom: others.bottom * perCssPixel,
     };
   }
 
@@ -235,7 +241,7 @@
     }
   }
 
-  // A squirrel's head as an SVG, in the coat of the player in `seat`.
+  // A squirrel's head as an SVG, in the coat of the player in `seat` (for the top bar and the panel).
   const heads = [];
   function headPicture(seat) {
     if (!heads[seat]) {
@@ -246,7 +252,7 @@
     return heads[seat];
   }
 
-  // An acorn, for the top bar of a two-player race, where "left" would not fit on a narrow phone.
+  // An acorn, for the top bar of a race with friends, where "left" would not fit on a narrow phone.
   let acornIcon = '';
 
   let hudShown = '';
@@ -254,18 +260,35 @@
     // \u00b7 is a middle dot. Explore has no clock and no end, so only what has been gathered.
     if (duo) {
       // Each count beside the head of that player's squirrel, this phone's
-      // first; in a race, then an acorn and how many are left.
+      // first; in a race, then an acorn and how many are left. With two
+      // players both counts are in the top bar; with three or four, the
+      // others' go on a row of their own under it, which a narrow phone has
+      // room for.
       if (!acornIcon) acornIcon = `<img class="acorn-icon" src="${Sprites.acorn.toDataURL()}" alt="">`;
-      const shown = `${headPicture(duo.seat)}${counts.you} ${headPicture(1 - duo.seat)}${counts.friend}`
-        + (mode === 'explore' ? '' : ` ${acornIcon}${acorns.length}`);
+      const others = otherSeats();
+      const count = (seat) => `${headPicture(seat)}${haulOf(seat)}`;
+      const left = mode === 'explore' ? '' : ` ${acornIcon}${acorns.length}`;
+      const top = (others.length > 1 ? count(duo.seat) : [duo.seat, ...others].map(count).join(' ')) + left;
+      const below = others.length > 1 ? others.map((seat) => `<span>${count(seat)}</span>`).join('') : '';
+      const shown = `${top}|${below}`;
       if (shown !== hudShown) {
-        el('acorns').innerHTML = shown;
-        el('acorns').setAttribute('aria-label', `You ${counts.you}, ${otherName()} ${counts.friend}` + (mode === 'explore' ? '' : `, ${acorns.length} acorns left`));
+        el('acorns').innerHTML = top;
+        el('others').innerHTML = below;
+        el('acorns').setAttribute('aria-label', [`You ${counts.you}`, ...others.map((seat) => `${nameOf(seat)} ${haulOf(seat)}`)].join(', ')
+          + (mode === 'explore' ? '' : `, ${acorns.length} acorns left`));
+        if (el('others').hidden !== !below) {
+          el('others').hidden = !below;
+          measureHud();
+        }
       }
       hudShown = shown;
     } else {
       el('acorns').textContent = mode === 'explore' ? `Acorns ${counts.you}` : `Acorns ${counts.you} \u00b7 ${acorns.length} left`;
-      if (hudShown) el('acorns').removeAttribute('aria-label');
+      el('acorns').removeAttribute('aria-label');
+      if (!el('others').hidden) {
+        el('others').hidden = true;
+        othersBox = null;
+      }
       hudShown = '';
     }
     el('time').textContent = formatTime(time);
@@ -276,9 +299,9 @@
     mode = newMode;
     paused = false;
     growing = [];
-    // In a two-player game the host starts just left of the crossing, the guest just right.
-    const apart = duo ? (duo.seat === 0 ? -START_APART : START_APART) : 0;
-    player.x = level.spawn.x + apart;
+    // With friends, each squirrel starts at its own place by the crossing: the
+    // host's just left of it, the second just right, the others further out.
+    player.x = level.spawn.x + (duo ? START_SPOTS[duo.seat] : 0);
     player.y = level.spawn.y;
     player.facing = 'down';
     player.idle = 0;
@@ -291,8 +314,10 @@
     acorns = level.acorns.map((acorn, index) => ({ id: index, x: acorn.x, y: acorn.y, phase: index, claimedBy: null, gone: false }));
     nextPhase = acorns.length;
     nextId = acorns.length;
-    Object.assign(friend, { x: level.spawn.x - apart, y: level.spawn.y, facing: 'down', moving: false, hop: 0, idle: 0, joy: 0, seen: false });
-    if (duo) duo.follow.clear();
+    if (duo) {
+      duo.hauls = [0, 0, 0, 0];
+      for (const other of duo.others.values()) toStart(other);
+    }
     for (const who of Object.keys(counts)) counts[who] = 0;
     particles = [];
     time = 0;
@@ -327,19 +352,22 @@
     }
   }
 
-  // Someone picks up an acorn: the player ('you'), the other player in a
-  // two-player game ('friend'), or a kind of rival.
-  function takeAcorn(acorn, who) {
+  // Someone picks up an acorn: the player ('you'), another player in a game
+  // with friends ('friend', with their `seat`), or a kind of rival.
+  function takeAcorn(acorn, who, seat = -1) {
     if (acorn.gone) return;
     acorn.gone = true;
     acorns = acorns.filter((other) => other !== acorn);
-    counts[who]++;
+    if (who !== 'friend') counts[who]++;
+    else if (seat >= 0) duo.hauls[seat]++;
     if (who === 'you') {
       player.joy = Sprites.cheer(player.joy);   // two jumps for joy, only for show
       burst(acorn, '#f0c670', 40);
       sound('pickup');
+      // For the test page: when this squirrel really reached the &first acorn.
+      if (auto && params.has('first') && acorn.id === Number(params.get('first'))) auto.firstAt = Date.now();
     } else if (who === 'friend') {
-      friend.joy = Sprites.cheer(friend.joy);
+      cheerFor(seat);
       burst(acorn, '#f0c670', 40);
       faintly('pickup', acorn);
     } else {
@@ -347,8 +375,8 @@
       sound('stolen', acorn);
     }
     updateHud();
-    if (duo) tellTaken(acorn, who);
-    // In a two-player game the host's phone grows acorns back and ends the race.
+    if (duo) tellTaken(acorn, who, seat);
+    // With friends, the host's phone grows acorns back and ends the race.
     if (duo && duo.role === 'guest') return;
     if (mode === 'explore') growing.push(time + GROW_BACK[0] + random() * (GROW_BACK[1] - GROW_BACK[0]));
     else if (acorns.length === 0) finish();
@@ -362,8 +390,8 @@
     if (!due.length) return;
     growing = growing.filter((when) => when > time);
     for (let i = 0; i < due.length; i++) {
-      // Out of sight of both players, in a two-player game.
-      const spot = level.newAcornSpot(random, acorns, duo ? [cameraView(), friendView()] : cameraView());
+      // Out of sight of every player, with friends.
+      const spot = level.newAcornSpot(random, acorns, duo ? [cameraView(), ...otherSeats().map(friendView)] : cameraView());
       if (!spot) {
         growing.push(time + 1);   // nowhere suitable just now: try again in a second
         continue;
@@ -397,14 +425,14 @@
     }
   }
 
-  // The cabin's door opens as a squirrel comes near (either, in a two-player
-  // game) and shuts after it has gone; inside the walls, the roof lifts off,
-  // on the phone whose squirrel it is.
+  // The cabin's door opens as a squirrel comes near (anyone's, in a game with
+  // friends) and shuts after it has gone; inside the walls, the roof lifts
+  // off, on the phone whose squirrel it is.
   const inCabin = (squirrel) => Math.abs(squirrel.x - cabin.x) < cabin.half && squirrel.y < cabin.y && squirrel.y > cabin.y - cabin.depth;
   const byDoor = (squirrel) => inCabin(squirrel) || Math.hypot(squirrel.x - cabin.door.x, squirrel.y - cabin.door.y) < DOOR_NEAR;
   function updateCabin(dt) {
     const inside = inCabin(player);
-    const near = byDoor(player) || Boolean(duo && duo.inRound && friend.seen && byDoor(friend));
+    const near = byDoor(player) || shownOthers().some(byDoor);
     if (near && door === 0) {
       sounds.creak(Math.max(0, 1 - Math.hypot(cabin.door.x - player.x, cabin.door.y - player.y) / 200));
       if (auto && auto.house) auto.house.log.creaks = (auto.house.log.creaks || 0) + 1;
@@ -494,12 +522,14 @@
   function nearestAcorn() {
     let nearest = null;
     let nearestDistance = Infinity;
-    // The test squirrel, playing someone, leaves them the acorns nearer to
-    // them, as a person would rather than chase them round the park.
-    const theirs = (acorn) => Boolean(auto && duo && duo.inRound && friend.seen)
-      && Math.hypot(acorn.x - friend.x, acorn.y - friend.y) < Math.hypot(acorn.x - player.x, acorn.y - player.y);
+    // The test squirrel, playing others, leaves them the acorns nearer to
+    // them, as a person would rather than chase them round the park. As it
+    // sees them a moment late, it counts them 16 px nearer than they look.
+    const others = auto && duo ? shownOthers() : [];
+    const theirs = (acorn) => others.some((other) => Math.hypot(acorn.x - other.x, acorn.y - other.y) < Math.hypot(acorn.x - player.x, acorn.y - player.y) + 16);
+    const mineLeft = others.length > 0 && acorns.some((acorn) => !theirs(acorn));
     for (const acorn of acorns) {
-      if (theirs(acorn) && acorns.some((other) => !theirs(other))) continue;
+      if (mineLeft && theirs(acorn)) continue;
       const distance = Math.hypot(acorn.x - player.x, acorn.y - player.y);
       if (distance < nearestDistance) {
         nearest = acorn;
@@ -591,7 +621,7 @@
   }
 
   function update(dt) {
-    if (duo) togetherUpdate(dt);   // talking to the other phone goes on, paused or not
+    if (duo) togetherUpdate(dt);   // talking to the other phones goes on, paused or not
     if (paused) return;   // everything stands still, the clock too
     clock += dt;
     effects.update(dt, clock);
@@ -617,7 +647,7 @@
     // After the round the rivals carry on, so a jay still flies off with its prize.
     rivals.update(dt);
     if (sounds.context()) listen(dt);
-    if (duo) animateFriend(dt);
+    if (duo) animateOthers(dt);
     if (state !== 'playing') return;
     if (readyIn > 0) {
       countDown(dt);
@@ -653,9 +683,9 @@
     updateHud();
   }
 
-  // "3, 2, 1, Go!" before a two-player round: nobody moves and the clock
-  // waits. The host's phone gives up waiting for the guest's after a few
-  // seconds, in case its "ready" was lost.
+  // "3, 2, 1, Go!" before a round with friends: nobody moves and the clock
+  // waits. The host's phone gives up waiting for the others' after a few
+  // seconds, in case a "ready" was lost.
   let goShown = 0;
   function countDown(dt) {
     if (readyIn === Infinity) {
@@ -667,7 +697,10 @@
     readyIn = Math.max(0, readyIn - dt);
     el('countdown').textContent = readyIn > 0 ? String(Math.ceil(readyIn)) : 'Go!';
     el('countdown').hidden = false;
-    if (readyIn === 0) goShown = 0.7;
+    if (readyIn === 0) {
+      goShown = 0.7;
+      if (reportsWanted) duo.goAt = Date.now();
+    }
   }
 
   // The Explore test hook: once a second of play, how it is going, on <body data-explore>.
@@ -746,8 +779,8 @@
     const px = Math.round(player.x) - camX;
     const py = Math.round(player.y) - camY;
     ctx.drawImage(Sprites.shadowSmall, px - 5, py - 2);
-    const friendShown = Boolean(duo && duo.inRound && friend.seen);
-    if (friendShown) ctx.drawImage(Sprites.shadowSmall, Math.round(friend.x) - 5 - camX, Math.round(friend.y) - 2 - camY);
+    const others = shownOthers();
+    for (const other of others) ctx.drawImage(Sprites.shadowSmall, Math.round(other.x) - 5 - camX, Math.round(other.y) - 2 - camY);
     for (const acorn of acorns) {
       ctx.drawImage(Sprites.shadowSmall, acorn.x - 5 - camX, acorn.y - 2 - camY);
     }
@@ -785,13 +818,13 @@
     for (const thing of rivals.things(clock)) {
       things.push({ sprite: thing.sprite, x: thing.x - camX, y: thing.y - camY, depth: thing.depth, clip: thing.clip });
     }
-    if (friendShown) {
-      // The other player's squirrel, in its own coat.
-      const theirs = coatOf(1 - duo.seat)[friend.facing];
-      const lift = friend.joy > 0 ? Sprites.joyLift(friend.joy, JOY_HEIGHT) : friend.moving ? [0, 1, 2, 1][Math.floor(friend.hop * 12) % 4] : 0;
+    for (const other of others) {
+      // Another player's squirrel, in its own coat.
+      const theirs = coatOf(other.seat)[other.facing];
+      const lift = other.joy > 0 ? Sprites.joyLift(other.joy, JOY_HEIGHT) : other.moving ? [0, 1, 2, 1][Math.floor(other.hop * 12) % 4] : 0;
       things.push({
-        sprite: friend.moving ? theirs.rest : Sprites.idleFrame(theirs, friend.idle),
-        x: Math.round(friend.x) - 8 - camX, y: Math.round(friend.y) - 15 - lift - camY, depth: friend.y,
+        sprite: other.moving ? theirs.rest : Sprites.idleFrame(theirs, other.idle),
+        x: Math.round(other.x) - 8 - camX, y: Math.round(other.y) - 15 - lift - camY, depth: other.y,
       });
     }
     const poses = coatOf(duo ? duo.seat : 0)[player.facing];
@@ -834,14 +867,14 @@
     if (state === 'playing' && clock % (ARROW_BLINK[0] + ARROW_BLINK[1]) < ARROW_BLINK[0]) {
       // Blinking arrows on the edge of the view, clear of the HUD and the minimap.
       const safe = { left: 7, top: Math.ceil(hudBottom) + 7, right: viewW - 8, bottom: viewH - 8 };
-      for (const arrow of Hud.hintArrows(player, acorns, view, HINT_ARROWS, safe, [minimapBox])) {
+      for (const arrow of Hud.hintArrows(player, acorns, view, HINT_ARROWS, safe, othersBox ? [minimapBox, othersBox] : [minimapBox])) {
         const sprite = Sprites.arrows[arrow.direction];
         ctx.drawImage(sprite, arrow.x - (sprite.width >> 1), arrow.y - (sprite.height >> 1));
       }
     }
     if (state !== 'menu') {
-      const others = friendShown ? [{ x: friend.x, y: friend.y, color: COAT_COLORS[1 - duo.seat] }] : [];
-      Hud.drawMinimap(minimapCtx, miniature, level, player, view, clock, others);
+      const dots = others.map((other) => ({ x: other.x, y: other.y, color: COAT_COLORS[other.seat] }));
+      Hud.drawMinimap(minimapCtx, miniature, level, player, view, clock, dots);
     }
   }
 
@@ -865,51 +898,115 @@
     }, 16);
   }
 
-  // ---- two players (1.13) ----
+  // ---- games with friends (1.13; up to four players since 1.14) ----
   //
   // Each phone builds the same park and moves its own squirrel. The host's
   // phone keeps the round: which acorns are left and who took each, the
   // clock, Explore's new acorns, the golden acorn, pausing and the end. Each
-  // phone takes an acorn the moment its squirrel reaches it; the guest tells
-  // the host when, by its own clock. A dead heat goes to the squirrel that
-  // really got there first: the host puts the guest's clock beside its own
-  // (from how late the guest's messages come and how long a round trip takes),
-  // and either count is put right on both phones. A round starts with a
-  // countdown that ends on both together. Each phone sends where its squirrel
-  // is twenty times a second and draws the other's a tenth of a second
-  // behind, smoothly (Duo.follower). There are no thieves: each phone has its
-  // own wildlife for show round its own squirrel, which never touches an
-  // acorn. The messages are in duo.js; the links, through PeerJS, in net.js.
+  // phone takes an acorn the moment its squirrel reaches it; a guest tells
+  // the host when, by its own clock. When two squirrels reach one together it
+  // goes to the one that really got there first: the host puts each guest's
+  // clock beside its own (from how late its messages come and how long a
+  // round trip takes), and the counts are put right on every phone. A round
+  // starts with a countdown that ends on every phone together. Each phone
+  // sends where its squirrel is twenty times a second; the guests are linked
+  // to the host's phone only, so it passes each guest's on to the others.
+  // Each phone draws the others a tenth of a second behind, smoothly
+  // (Duo.follower). There are no thieves: each phone has its own wildlife
+  // for show round its own squirrel, which never touches an acorn. Friends
+  // come and go: one who joins part-way through a round starts at the
+  // crossing with nothing, and when one leaves the rest play on. The
+  // messages are in duo.js; the links, through PeerJS, in net.js.
 
   const now = () => performance.now() / 1000;
-  const coatOf = (seat) => (seat === 1 ? Sprites.blackSquirrel : Sprites.squirrel);
-  const otherName = () => (duo && duo.names[1 - duo.seat]) || 'the other player';
+  const COATS = [Sprites.squirrel, Sprites.blackSquirrel, Sprites.whiteSquirrel, Sprites.brownSquirrel];
+  const coatOf = (seat) => COATS[seat] || Sprites.squirrel;
+  // A player's name, by seat.
+  const nameOf = (seat) => (duo && duo.players[seat] && duo.players[seat].name) || 'the other player';
+  // "Sam", "Sam and Jo", "Sam, Jo and Mo".
+  const inWords = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list.join(''));
+  // The seats in this game other than this phone's.
+  const otherSeats = () => duo.players.map((someone, seat) => (someone && seat !== duo.seat ? seat : -1)).filter((seat) => seat >= 0);
+  // How many acorns the player in `seat` has this round. Seat -1 is someone
+  // who has since left the game.
+  const haulOf = (seat) => (seat === duo.seat ? counts.you : duo.hauls[seat] || 0);
+  function addHaul(seat, n) {
+    if (seat === duo.seat) counts.you += n;
+    else if (seat >= 0) duo.hauls[seat] += n;
+  }
 
-  // A sound the other player makes: faint, and only when it is near.
+  // The squirrel of the player in `seat`, as drawn on this phone: where it
+  // is, how it looks, and the positions its phone has sent (`follow`).
+  function otherIn(seat) {
+    let other = duo.others.get(seat);
+    if (!other) {
+      other = { seat, x: 0, y: 0, facing: 'down', moving: false, hop: 0, idle: 0, joy: 0, seen: false, follow: Duo.follower() };
+      toStart(other);
+      duo.others.set(seat, other);
+    }
+    return other;
+  }
+
+  // Back to its place by the crossing, not yet heard from.
+  function toStart(other) {
+    Object.assign(other, { x: level.spawn.x + START_SPOTS[other.seat], y: level.spawn.y, facing: 'down', moving: false, hop: 0, idle: 0, joy: 0, seen: false });
+    other.follow.clear();
+  }
+
+  // The other squirrels on screen: in a round, once their first position has come.
+  const shownOthers = () => (duo && duo.inRound ? [...duo.others.values()].filter((other) => other.seen && duo.players[other.seat]) : []);
+
+  // A jump for joy, for whoever's squirrel it is.
+  function cheerFor(seat) {
+    if (seat === duo.seat) player.joy = Sprites.cheer(player.joy);
+    else if (seat >= 0) {
+      const other = otherIn(seat);
+      other.joy = Sprites.cheer(other.joy);
+    }
+  }
+
+  // A sound another player makes: faint, and only when it is near.
   function faintly(name, at) {
     const distance = Math.hypot(at.x - player.x, at.y - player.y);
     if (distance < 240) sounds.beep(name, 0.5 * (1 - distance / 240));
   }
 
-  // Who this phone is in a two-player game, and what it knows of the other.
+  // Who this phone is in a game with friends, and what it knows of the others.
   function newSession(role, name) {
     return {
-      role, seat: role === 'host' ? 0 : 1, names: role === 'host' ? [name, ''] : ['', name],
+      role, seat: role === 'host' ? 0 : -1,
+      players: [role === 'host' ? { name, here: true } : null, null, null, null],   // each seat's { name, here }, or null
       host: null, guest: null, room: null, code: '',
       inRound: false, round: 0,
-      follow: Duo.follower(), heardAt: now(), sendIn: 0, waiting: false,
-      view: { w: VIEW_SHORT * 2, h: VIEW_SHORT },   // the host's idea of the guest's screen, until it says
-      sentView: { w: 0, h: 0 },                     // the guest's: the screen it last told the host about
-      pause: { seq: 0, by: null },                  // how many times pausing has changed, and who did it last
-      hostPause: { on: false, by: null },           // the guest's: the host's pausing, as last heard
-      owners: new Map(),                            // who took each acorn this round: 0 the host, 1 the guest
-      takenAt: new Map(),                           // the host's: when (its clock) it took each of its own
-      goldenAt: 0,                                  // the host's: when it found the golden acorn
-      timing: { gaps: [], trips: [] },              // the host's: how late the guest's messages come, and round trips
-      echo: null,                                   // the guest's: the host's latest clock reading, and when it came
-      overturned: 0,                                // acorns this phone took that turned out to be the other's
-      decisions: [],                                // for the test page: the host's dead heats, guest's time less host's
+      others: new Map(),           // seat -> another player's squirrel, as drawn here (see otherIn)
+      hauls: [0, 0, 0, 0],         // the other players' acorns this round, by seat (this phone's is counts.you)
+      heardAt: now(), sendIn: 0, waiting: false,      // the guest's: when the host was last heard, and whether it is waited for
+      sentView: { w: 0, h: 0 },                       // the guest's: the screen it last told the host about
+      links: new Map(),                               // the host's: seat -> what it knows of that phone (see linkOf)
+      pause: { seq: 0, by: null, waits: [] },         // how many times pausing has changed, who did it last, whom the host waits for
+      hostPause: { on: false, by: null, waits: [] },  // the guest's: the host's pausing, as last heard
+      owners: new Map(),           // who took each acorn this round, by seat (-1: someone who has since left)
+      claimedAt: new Map(),        // the host's: when (its clock) each acorn's owner reached it
+      goldenSeat: null,            // who found the golden acorn this round, by seat
+      goldenAt: 0,                 // the host's: when (its clock) they reached it
+      readying: null,              // the host's, as a round starts: seat -> round trip of its "ready" (null until it comes)
+      sentRoundAt: 0,
+      echo: null,                  // the guest's: the host's latest clock reading, and when it came
+      overturned: 0,               // acorns this phone took that turned out to be another's
+      decisions: [],               // for the test page: the host's close calls, the claimant's time less the owner's
     };
+  }
+
+  // What the host knows of the phone in `seat`: when it was last heard and
+  // whether it has gone quiet, its screen, how late its messages come and
+  // how long a round trip takes.
+  function linkOf(seat) {
+    let link = duo.links.get(seat);
+    if (!link) {
+      link = { heardAt: now(), quiet: false, view: { w: VIEW_SHORT * 2, h: VIEW_SHORT }, gaps: [], trips: [] };
+      duo.links.set(seat, link);
+    }
+    return link;
   }
 
   // ---- hosting and joining ----
@@ -921,25 +1018,9 @@
     const session = newSession('host', name);
     session.host = Duo.createHost({
       name, version: VERSION,
-      onjoin: ({ name: theirs }) => {
-        if (duo !== session) return;
-        session.names[1] = theirs;
-        session.heardAt = now();
-        session.follow.clear();
-        if (session.inRound) sendRound(false);
-        else session.host.send({ t: 'lobby', host: session.names[0], guest: theirs });
-        if (!session.inRound) showDuo('host', '');
-        if (auto && params.has('start') && !session.inRound) startTogether(params.get('start') === 'explore' ? 'explore' : 'race');
-      },
-      onleave: ({ left }) => {
-        if (duo !== session) return;
-        if (!session.inRound) {
-          session.names[1] = '';
-          showDuo('host', '');
-        } else if (left) otherLeft();
-        // A link lost in a round: the game waits for the phone to come back (see togetherUpdate).
-      },
-      onmessage: (message) => duo === session && hostHeard(message),
+      onjoin: ({ seat, back }) => duo === session && someoneCame(seat, back),
+      onleave: ({ seat, name: theirs, left }) => duo === session && someoneWent(seat, theirs, left),
+      onmessage: (seat, message) => duo === session && hostHeard(seat, message),
     });
     duo = session;
     keepAwake(true);
@@ -959,6 +1040,61 @@
       endTogether();
       showDuo('choose', error.message, true);
     }
+  }
+
+  // A phone joined the host's game, or came back after dropping out. One
+  // that joins part-way through a round starts at the crossing with nothing
+  // (in the countdown, with everyone); one that comes back takes up where it
+  // was; one that joins while the end screen is up waits for the next round.
+  function someoneCame(seat, back) {
+    duo.players = duo.host.players();
+    linkOf(seat).heardAt = now();
+    otherIn(seat).follow.clear();
+    duo.host.sendLobby();
+    if (duo.inRound && (back || state === 'playing')) {
+      const fresh = readyIn === Infinity;   // the others' "ready" still awaited: this one's too
+      if (fresh && duo.readying && !duo.readying.has(seat)) duo.readying.set(seat, null);
+      sendRound(seat, fresh);
+    }
+    if (duo.inRound) updateHud();
+    else showDuo('host', '');
+    // The test hook &start (with &players, 2 by default) starts once that many are in.
+    if (auto && params.has('start') && !duo.inRound && duo.host.linked().length >= Number(params.get('players') || 2) - 1) {
+      startTogether(params.get('start') === 'explore' ? 'explore' : 'race');
+    }
+  }
+
+  // A phone left the host's game, or lost its link. Before the first round
+  // its seat is free again. Once a game is on, one that said goodbye has gone
+  // and the rest play on (the game ends if nobody else is left); one whose
+  // link dropped keeps its place and is waited for (see watchQuiet).
+  function someoneWent(seat, theirs, left) {
+    duo.players = duo.host.players();
+    if (duo.inRound && left && !otherSeats().length) {
+      otherLeft(theirs);
+      return;
+    }
+    if (!duo.players[seat]) {
+      forget(seat);
+      if (duo.readying && duo.readying.delete(seat)) everyoneReady();
+    }
+    duo.host.sendLobby();
+    if (!duo.inRound) {
+      showDuo('host', '');
+      return;
+    }
+    waitForQuiet(false);
+    updateHud();
+  }
+
+  // The player in `seat` has gone: their squirrel goes, and their acorns come
+  // off the scores (the acorns stay taken).
+  function forget(seat) {
+    duo.others.delete(seat);
+    duo.links.delete(seat);
+    duo.hauls[seat] = 0;
+    for (const [id, owner] of duo.owners) if (owner === seat) duo.owners.set(id, -1);
+    if (duo.goldenSeat === seat) duo.goldenSeat = -1;
   }
 
   async function joinGame(typed) {
@@ -993,51 +1129,68 @@
 
   // ---- a round ----
 
-  // The host starts a round for both phones.
+  // The host starts a round for every phone linked.
   function startTogether(newMode) {
     if (!duo || duo.role !== 'host') return;
-    const there = duo.host.guest;
-    if (!there || !there.here) return;
+    const linked = duo.host.linked();
+    if (!linked.length) return;
     duo.round++;
     duo.inRound = true;
     duo.host.setStarted(true);
     duo.owners.clear();
-    duo.takenAt.clear();
-    duo.pause = { seq: duo.pause.seq + 1, by: null };
-    duo.heardAt = now();
-    duo.waiting = false;
+    duo.claimedAt.clear();
+    duo.goldenSeat = null;
+    duo.pause = { seq: duo.pause.seq + 1, by: null, waits: [] };
+    for (const link of duo.links.values()) {
+      link.heardAt = now();
+      link.quiet = false;
+    }
     start(newMode);
-    // The guest starts its countdown when this reaches it, and says so. The
-    // host's waits for that, then runs for what is left of it on the guest's
-    // phone: COUNTDOWN less half the round trip.
+    // Each phone starts its countdown when the round reaches it, and says so.
+    // The host's waits for them all, then runs for what is left of theirs:
+    // COUNTDOWN less half the round trip, on average.
     readyIn = Infinity;
     duo.sentRoundAt = now();
-    sendRound(true);
+    duo.readying = new Map(linked.map((seat) => [seat, null]));
+    for (const seat of linked) sendRound(seat, true);
   }
 
-  // How the round stands, for the guest: at the start, and whenever its phone
-  // comes back after dropping out.
-  function sendRound(fresh) {
-    duo.host.send({
-      t: 'round', n: duo.round, fresh, mode, time: +time.toFixed(2), over: state === 'over',
+  // Every "ready" the host was waiting for is in.
+  function everyoneReady() {
+    if (readyIn !== Infinity || !duo.readying) return;
+    const trips = [...duo.readying.values()];
+    if (!trips.length || trips.includes(null)) return;
+    const trip = trips.reduce((sum, each) => sum + each, 0) / trips.length;
+    readyIn = Math.max(0, COUNTDOWN + trip / 2 - (now() - duo.sentRoundAt));
+  }
+
+  // How the round stands, for the phone in `seat`: at the start, when it
+  // joins part-way through, and whenever it comes back after dropping out.
+  // `fresh`: it is to count down with the rest and say when it is ready.
+  function sendRound(seat, fresh) {
+    const other = otherIn(seat);
+    duo.host.sendTo(seat, {
+      t: 'round', n: duo.round, fresh, mode, time: +time.toFixed(2), over: state === 'over', seat,
       acorns: acorns.map((acorn) => [acorn.id, acorn.x, acorn.y]),
       owners: [...duo.owners],
-      counts: [counts.you, counts.friend],
-      golden: golden === null ? null : golden === 'you' ? 0 : 1,
-      paused, by: duo.pause.by, seq: duo.pause.seq,
-      at: { x: Math.round(friend.x), y: Math.round(friend.y) },
-      names: duo.names,
-      countdown: fresh ? COUNTDOWN : 0,
+      hauls: duo.players.map((someone, seat) => (someone ? haulOf(seat) : 0)),
+      golden: duo.goldenSeat,
+      paused, by: duo.pause.by, waits: duo.pause.waits, seq: duo.pause.seq,
+      at: { x: Math.round(other.x), y: Math.round(other.y) },
+      players: duo.players,
+      countdown: readyIn === Infinity ? COUNTDOWN : readyIn,
     });
   }
 
-  // The guest takes the round as the host has it. A new one starts afresh; for
-  // the one already under way (this phone dropped out and is back) only the
-  // acorns, the counts, the clock and the pausing are brought up to date.
+  // The guest takes the round as the host has it. A new one starts afresh
+  // (counting down with the rest if it has not begun); for the one already
+  // under way (this phone dropped out and is back) only the acorns, the
+  // counts, the clock and the pausing are brought up to date.
   function joinRound(message) {
     const fresh = message.n !== duo.round;
     duo.round = message.n;
-    duo.names = message.names;
+    if (Number.isInteger(message.seat)) duo.seat = message.seat;
+    applyRoster(message.players);
     duo.inRound = true;
     duo.waiting = false;
     if (fresh || state === 'menu') {
@@ -1052,26 +1205,52 @@
     acorns = message.acorns.map(([id, x, y]) => ({ id, x, y, phase: id, claimedBy: null, gone: false }));
     nextPhase = acorns.reduce((most, acorn) => Math.max(most, acorn.id + 1), nextPhase);
     duo.owners = new Map(message.owners);
-    counts.you = message.counts[1];
-    counts.friend = message.counts[0];
-    golden = message.golden === null ? null : message.golden === 1 ? 'you' : 'friend';
+    setHauls(message.hauls);
+    duo.goldenSeat = typeof message.golden === 'number' ? message.golden : null;
+    golden = duo.goldenSeat === null ? null : duo.goldenSeat === duo.seat ? 'you' : 'friend';
     el('golden').hidden = golden !== 'you';
     time = message.time;
-    duo.follow.clear();
+    for (const other of duo.others.values()) other.follow.clear();
     duo.pause.seq = message.seq;
-    duo.hostPause = { on: message.paused, by: message.by };
+    duo.hostPause = { on: message.paused, by: message.by, waits: Array.isArray(message.waits) ? message.waits : [] };
     showHostPause();
     if (message.over && state === 'playing') finish();
     updateHud();
     measureHud();
   }
 
-  // Where this phone's squirrel is, for the other phone; the host's also says
-  // how the round stands: its clock and its pausing.
+  // Everyone's acorns, by seat, as the host has them.
+  function setHauls(hauls) {
+    if (!Array.isArray(hauls)) return;
+    hauls.forEach((haul, seat) => {
+      if (typeof haul !== 'number') return;
+      if (seat === duo.seat) counts.you = haul;
+      else duo.hauls[seat] = haul;
+    });
+  }
+
+  // Who is in the game, as the host says. A seat that has emptied is
+  // forgotten: that player has gone, and the rest play on.
+  function applyRoster(players) {
+    if (!Array.isArray(players)) return;
+    const before = duo.players;
+    duo.players = [0, 1, 2, 3].map((seat) => {
+      const someone = players[seat];
+      return someone && typeof someone.name === 'string' ? { name: Duo.cleanName(someone.name) || '?', here: Boolean(someone.here) } : null;
+    });
+    before.forEach((someone, seat) => {
+      if (someone && !duo.players[seat] && seat !== duo.seat) forget(seat);
+    });
+    hudShown = '';   // the counts are drawn afresh, names and all
+  }
+
+  // Where this phone's squirrel is, for the others; the host's also says how
+  // the round stands: its clock and its pausing.
   function sendPosition() {
     const spot = { s: +now().toFixed(3), x: +player.x.toFixed(1), y: +player.y.toFixed(1), f: player.facing, m: player.moving && !paused ? 1 : 0 };
     if (duo.role === 'host') {
-      duo.host.send(Object.assign({ t: 'tick', time: +time.toFixed(2), p: paused ? 1 : 0, b: duo.pause.by, q: duo.pause.seq }, spot));
+      const waits = duo.pause.by === 'w' ? { w: duo.pause.waits } : {};
+      duo.host.send(Object.assign({ t: 'tick', time: +time.toFixed(2), p: paused ? 1 : 0, b: duo.pause.by, q: duo.pause.seq }, waits, spot));
     } else {
       const echo = duo.echo ? { e: duo.echo.s, h: +(now() - duo.echo.at).toFixed(3) } : {};
       duo.guest.send(Object.assign({ t: 'me' }, spot, echo));
@@ -1079,7 +1258,7 @@
   }
 
   // Every update, paused or not: send this phone's squirrel when it is time,
-  // wait for the other phone if it has gone quiet, and place the other squirrel.
+  // wait for any phone that has gone quiet, and place the other squirrels.
   function togetherUpdate(dt) {
     if (!duo.inRound) return;
     const at = now();
@@ -1091,113 +1270,100 @@
         duo.sentView = { w: viewW, h: viewH };
       }
     }
-    if (state === 'playing' && !duo.waiting && at - duo.heardAt > QUIET) {
+    if (duo.role === 'host') watchQuiet(at);
+    else if (state === 'playing' && !duo.waiting && at - duo.heardAt > QUIET) {
       duo.waiting = true;
-      if (duo.role === 'guest') pauseHere('waiting');
-      else if (!paused) setPause(true, 'w');
+      pauseHere('waiting', [0]);
     }
-    const spot = duo.follow.at(at);
-    if (spot) {
-      // A late message can move where the other squirrel should be: it
-      // catches up a little at a time, faster than it runs, rather than
-      // jumping; from far off (back after a drop) it goes straight there.
-      const dx = spot.x - friend.x;
-      const dy = spot.y - friend.y;
-      const away = Math.hypot(dx, dy);
-      const most = SPEED * 2.5 * dt + 0.5;
-      const step = !friend.seen || away > 48 || away <= most ? 1 : most / away;
-      // For the test page: the furthest the other squirrel moved in one update.
-      if (reportsWanted && friend.seen) friendMoved.most = Math.max(friendMoved.most, away * step);
-      friend.x += dx * step;
-      friend.y += dy * step;
-      friend.facing = spot.facing;
-      friend.moving = spot.moving && !paused;
-      friend.seen = true;
+    for (const other of duo.others.values()) placeOther(other, at, dt);
+  }
+
+  // A late message can move where another squirrel should be: it catches up
+  // a little at a time, faster than it runs, rather than jumping; from far
+  // off (back after a drop) it goes straight there.
+  function placeOther(other, at, dt) {
+    const spot = other.follow.at(at);
+    if (!spot) return;
+    const dx = spot.x - other.x;
+    const dy = spot.y - other.y;
+    const away = Math.hypot(dx, dy);
+    const most = SPEED * 2.5 * dt + 0.5;
+    const step = !other.seen || away > 48 || away <= most ? 1 : most / away;
+    // For the test page: the furthest any other squirrel moved in one update.
+    if (reportsWanted && other.seen) friendMoved.most = Math.max(friendMoved.most, away * step);
+    other.x += dx * step;
+    other.y += dy * step;
+    other.facing = spot.facing;
+    other.moving = spot.moving && !paused;
+    other.seen = true;
+  }
+
+  function animateOthers(dt) {
+    for (const other of duo.others.values()) {
+      other.joy = Math.max(0, other.joy - dt);
+      if (other.moving) {
+        other.hop += dt;
+        other.idle = 0;
+      } else {
+        other.hop = 0;
+        other.idle += dt;
+      }
     }
   }
 
-  function animateFriend(dt) {
-    friend.joy = Math.max(0, friend.joy - dt);
-    if (friend.moving) {
-      friend.hop += dt;
-      friend.idle = 0;
-    } else {
-      friend.hop = 0;
-      friend.idle += dt;
-    }
-  }
-
-  // The part of the park on the guest's screen, as near as the host can tell:
-  // the host sees the guest's squirrel a moment late, so with a little more
-  // all round, for how far it may have run since.
-  function friendView() {
-    const { w, h } = duo.view;
+  // The part of the park on the screen of the phone in `seat`, as near as
+  // the host can tell: it sees that squirrel a moment late, so with a little
+  // more all round, for how far it may have run since.
+  function friendView(seat) {
+    const other = otherIn(seat);
+    const { w, h } = linkOf(seat).view;
     const late = 24;
-    return { x: cameraOffset(Math.round(friend.x), w) - late, y: cameraOffset(Math.round(friend.y), h) - late, w: w + 2 * late, h: h + 2 * late };
+    return { x: cameraOffset(Math.round(other.x), w) - late, y: cameraOffset(Math.round(other.y), h) - late, w: w + 2 * late, h: h + 2 * late };
   }
 
   // ---- what the host hears ----
 
-  function hostHeard(message) {
-    duo.heardAt = now();
+  function hostHeard(seat, message) {
+    const link = linkOf(seat);
+    link.heardAt = now();
+    if (link.quiet) {
+      // This phone has come back after going quiet.
+      link.quiet = false;
+      waitForQuiet(false);
+    }
     if (message.t === 'me') {
-      duo.follow.push(message, now());
-      timeLink(message);
-      // The guest's phone has come back after going quiet.
-      if (duo.waiting) {
-        duo.waiting = false;
-        if (paused && duo.pause.by === 'w') setPause(false, null);
-      }
+      otherIn(seat).follow.push(message, now());
+      timeLink(link, message);
+      // The guests are linked to the host only: it passes the position on to the rest.
+      duo.host.sendOthers(seat, { t: 'pos', seat, s: message.s, x: message.x, y: message.y, f: message.facing, m: message.moving ? 1 : 0 });
       return;
     }
     if (message.t === 'view') {
-      duo.view = { w: message.w, h: message.h };
+      link.view = { w: message.w, h: message.h };
       return;
     }
     if (!duo.inRound) return;
     if (message.t === 'took') {
-      const acorn = acorns.find((each) => each.id === message.id);
-      if (acorn && state === 'playing') {
-        takeAcorn(acorn, 'friend');   // which tells the guest it was theirs
-      } else if (duo.owners.get(message.id) === 0 && reachedFirst(message.s, duo.takenAt.get(message.id))) {
-        // The host's squirrel took it, but the guest's had got there first:
-        // the news was on its way. It is the guest's.
-        duo.owners.set(message.id, 1);
-        duo.overturned++;
-        counts.you--;
-        counts.friend++;
-        friend.joy = Sprites.cheer(friend.joy);
-        updateHud();
-        duo.host.send({ t: 'taken', id: message.id, by: 1 });
-        if (state === 'over') finishTogether();   // the result changed
-      } else {
-        duo.host.send({ t: 'taken', id: message.id, by: duo.owners.has(message.id) ? duo.owners.get(message.id) : 0 });
-      }
+      guestTook(seat, message);
     } else if (message.t === 'golden') {
-      if (golden === null && state === 'playing') friendFoundGolden();
-      else if (golden === 'you' && reachedFirst(message.s, duo.goldenAt)) {
-        golden = 'friend';
-        el('golden').hidden = true;
-        measureHud();
-        friend.joy = Sprites.cheer(friend.joy);
-        if (state === 'over') finishTogether();
-      }
-      duo.host.send({ t: 'golden', by: golden === 'you' ? 0 : 1 });
+      guestFoundGolden(seat, message.s);
     } else if (message.t === 'ready') {
-      if (readyIn === Infinity) readyIn = Math.max(0, COUNTDOWN - (now() - duo.sentRoundAt) / 2);
+      if (readyIn === Infinity && duo.readying && duo.readying.get(seat) === null) {
+        duo.readying.set(seat, now() - duo.sentRoundAt);
+        everyoneReady();
+      }
     } else if (message.t === 'pause') {
-      duo.waiting = false;
-      if (state === 'playing') setPause(true, 1);
+      if (state === 'playing') setPause(true, seat);
     } else if (message.t === 'resume') {
       if (paused) setPause(false, null);
     }
   }
 
-  // How late the guest's messages come and how long a round trip takes, from
-  // its last forty positions: so the host can put the guest's clock beside its
-  // own, and tell which squirrel reached an acorn first.
-  function timeLink(message) {
-    const { gaps, trips } = duo.timing;
+  // How late a guest's messages come and how long a round trip takes, from
+  // its last forty positions: so the host can put that phone's clock beside
+  // its own, and tell which squirrel reached an acorn first.
+  function timeLink(link, message) {
+    const { gaps, trips } = link;
     gaps.push(now() - message.s);
     if (gaps.length > 40) gaps.shift();
     if (message.e !== undefined) {
@@ -1206,27 +1372,100 @@
     }
   }
 
-  // Whether the guest's squirrel reached something at `s` (its clock) before
-  // the host's did at `hostAt` (the host's clock). Messages are taken to be as
-  // quick each way; with no timing yet the host keeps what it has.
-  function reachedFirst(s, hostAt) {
-    const { gaps, trips } = duo.timing;
-    if (typeof s !== 'number' || typeof hostAt !== 'number' || !gaps.length || !trips.length) return false;
-    const behind = Math.min(...gaps) - Math.max(0, Math.min(...trips)) / 2;   // how far the guest's clock is behind the host's
-    if (reportsWanted) duo.decisions.push([+(s + behind - hostAt).toFixed(3), +Math.min(...gaps).toFixed(3), +Math.min(...trips).toFixed(3)]);
-    return s + behind < hostAt;
+  // When (by the host's clock) the squirrel in `seat` reached something it
+  // says it reached at `s`, by its own clock: that clock is put beside the
+  // host's from the quickest of its recent messages, less half the quickest
+  // round trip (messages are taken to be as quick each way). With no timing
+  // yet, when the news came: as late as it can have been, so whoever already
+  // has the thing keeps it.
+  function reachedAt(seat, s) {
+    const { gaps, trips } = linkOf(seat);
+    if (typeof s !== 'number' || !gaps.length || !trips.length) return now();
+    return s + Math.min(...gaps) - Math.max(0, Math.min(...trips)) / 2;
   }
 
-  // The host pauses or resumes both phones; `by` is who asked: 0 the host, 1
-  // the guest, 'w' the host's phone waiting for the guest's.
-  function setPause(on, by) {
-    duo.pause = { seq: duo.pause.seq + 1, by: on ? by : null };
-    if (on) pauseHere(by === 0 ? 'you' : by === 1 ? 'friend' : 'waiting');
+  // Whether a squirrel that got there at `at` beat one that got there at
+  // `ownerAt` (both by the host's clock).
+  function earlier(at, ownerAt) {
+    if (reportsWanted) duo.decisions.push(+(at - ownerAt).toFixed(3));
+    return typeof ownerAt === 'number' && at < ownerAt;
+  }
+
+  // A guest's squirrel took an acorn. The first news of it decides, unless
+  // news from another squirrel shows that one got there earlier: then it is
+  // that one's, and the counts are put right on every phone.
+  function guestTook(seat, { id, s }) {
+    const at = reachedAt(seat, s);
+    const acorn = acorns.find((each) => each.id === id);
+    if (acorn && state === 'playing') {
+      takeAcorn(acorn, 'friend', seat);   // which tells everyone whose it is
+      duo.claimedAt.set(id, at);
+      return;
+    }
+    const owner = duo.owners.has(id) ? duo.owners.get(id) : -1;
+    if (duo.owners.has(id) && owner !== seat && earlier(at, duo.claimedAt.get(id))) {
+      duo.owners.set(id, seat);
+      duo.claimedAt.set(id, at);
+      if (owner === duo.seat) duo.overturned++;
+      addHaul(owner, -1);
+      addHaul(seat, 1);
+      cheerFor(seat);
+      updateHud();
+      duo.host.send({ t: 'taken', id, by: seat });
+      if (state === 'over') finishTogether();   // the result changed
+    } else {
+      duo.host.sendTo(seat, { t: 'taken', id, by: owner });
+    }
+  }
+
+  // A guest's squirrel found the golden acorn: the same, for the golden acorn.
+  function guestFoundGolden(seat, s) {
+    const at = reachedAt(seat, s);
+    if (duo.goldenSeat === null || (duo.goldenSeat !== seat && earlier(at, duo.goldenAt))) {
+      duo.goldenAt = at;
+      friendFoundGolden(seat);
+      duo.host.send({ t: 'golden', by: seat });
+      if (state === 'over') finishTogether();
+    } else {
+      duo.host.sendTo(seat, { t: 'golden', by: duo.goldenSeat });
+    }
+  }
+
+  // The host pauses or resumes every phone; `by` is who asked (a seat), or
+  // 'w' for the host's phone waiting for the quiet ones (`waits`, by seat).
+  function setPause(on, by, waits = []) {
+    duo.pause = { seq: duo.pause.seq + 1, by: on ? by : null, waits: on && by === 'w' ? waits : [] };
+    if (on) pauseHere(by === 0 ? 'you' : by === 'w' ? 'waiting' : by, waits);
     else resumeHere();
-    sendPosition();   // the guest hears at once
+    sendPosition();   // the others hear at once
   }
 
-  // ---- what the guest hears ----
+  // The host waits for any phone that has gone quiet (its link lost, say),
+  // and goes on once every one has been heard again (see hostHeard).
+  function watchQuiet(at) {
+    if (state !== 'playing') return;
+    let newly = false;
+    for (const [seat, link] of duo.links) {
+      if (duo.players[seat] && !link.quiet && at - link.heardAt > QUIET) {
+        link.quiet = true;
+        newly = true;
+      }
+    }
+    if (newly) waitForQuiet(true);
+  }
+
+  // Pausing for the quiet phones: begun when one goes quiet (unless already
+  // paused), brought up to date as the list changes, over when none is left.
+  // Resume plays on without them.
+  function waitForQuiet(newly) {
+    const waits = [...duo.links].filter(([seat, link]) => link.quiet && duo.players[seat]).map(([seat]) => seat).sort((a, b) => a - b);
+    if (paused && duo.pause.by === 'w') {
+      if (!waits.length) setPause(false, null);
+      else if (waits.join() !== duo.pause.waits.join()) setPause(true, 'w', waits);
+    } else if (newly && waits.length && !paused) setPause(true, 'w', waits);
+  }
+
+  // ---- what a guest hears ----
 
   function guestHeard(message) {
     duo.heardAt = now();
@@ -1235,7 +1474,8 @@
       showHostPause();
     }
     if (message.t === 'lobby') {
-      duo.names = [message.host, message.guest];
+      if (Number.isInteger(message.seat)) duo.seat = message.seat;
+      applyRoster(message.players);
       if (!duo.inRound) showDuo('join', '');
       return;
     }
@@ -1244,7 +1484,7 @@
       return;
     }
     if (message.t === 'closed' || message.t === 'denied') {
-      const said = message.t === 'closed' ? `${duo.names[0] || 'The other player'} ended the game.` : Duo.deniedText(message, VERSION);
+      const said = message.t === 'closed' ? `${duo.players[0] ? duo.players[0].name : 'The other player'} ended the game.` : Duo.deniedText(message, VERSION);
       endTogether();
       toMenu();
       showDuo('ended', said, true);
@@ -1252,80 +1492,94 @@
     }
     if (!duo.inRound) return;
     if (message.t === 'tick') {
-      duo.follow.push(Duo.cleanSpot(message) || message, now());
+      const spot = Duo.cleanSpot(message);
+      if (spot) otherIn(0).follow.push(spot, now());
       duo.echo = { s: message.s, at: now() };
       if (state === 'playing' && typeof message.time === 'number') time = message.time;
       if (message.q !== duo.pause.seq) {
         duo.pause.seq = message.q;
-        duo.hostPause = { on: Boolean(message.p), by: message.b };
+        duo.hostPause = { on: Boolean(message.p), by: message.b, waits: Array.isArray(message.w) ? message.w : [] };
         showHostPause();
       }
+    } else if (message.t === 'pos') {
+      // Another guest's squirrel, passed on by the host.
+      const spot = Duo.cleanSpot(message);
+      if (spot && message.seat !== duo.seat && duo.players[message.seat]) otherIn(message.seat).follow.push(spot, now());
     } else if (message.t === 'taken') {
       tookHere(message);
     } else if (message.t === 'grown') {
       if (!acorns.some((acorn) => acorn.id === message.id)) acorns.push({ id: message.id, x: message.x, y: message.y, phase: nextPhase++, claimedBy: null, gone: false });
       updateHud();
     } else if (message.t === 'golden') {
-      if (message.by === 0 && golden !== 'friend') friendFoundGolden();
-      else if (message.by === 1 && golden !== 'you') {
-        golden = 'you';
-        el('golden').hidden = false;
-        measureHud();
-        if (state === 'over') finishTogether();
-      }
+      goldenHere(message.by);
     } else if (message.t === 'end') {
-      counts.you = message.counts[1];
-      counts.friend = message.counts[0];
+      setHauls(message.hauls);
       time = message.time;
       if (state === 'playing') finish();
       else if (state === 'over') finishTogether();   // the host put the result right
     }
   }
 
-  // The host's pausing, on the guest's phone.
+  // The host's pausing, on a guest's phone. While the host waits for this
+  // phone, it shows a plain pause.
   function showHostPause() {
     if (duo.waiting) return;
-    const { on, by } = duo.hostPause;
-    if (on) pauseHere(by === 0 ? 'friend' : 'you');
-    else if (paused) resumeHere();
+    const { on, by, waits } = duo.hostPause;
+    if (!on) {
+      if (paused) resumeHere();
+    } else if (by === 'w') {
+      const others = waits.filter((seat) => seat !== duo.seat);
+      if (others.length) pauseHere('waiting', others);
+      else pauseHere('you');
+    } else pauseHere(by === duo.seat ? 'you' : by);
   }
 
-  // The host says who took an acorn. If this phone already had it down as
-  // the other way round (it took it itself, or the host changed its mind),
-  // one count goes over to the other.
+  // The host says who took an acorn. If this phone had it down otherwise (it
+  // took it itself, or the host changed its mind), one count goes over.
   function tookHere({ id, by }) {
+    if (typeof by !== 'number') return;
     const before = duo.owners.get(id);
     if (before === undefined) {
       const acorn = acorns.find((each) => each.id === id);
-      if (acorn) takeAcorn(acorn, by === duo.seat ? 'you' : 'friend');
+      if (acorn) takeAcorn(acorn, by === duo.seat ? 'you' : 'friend', by);
       duo.owners.set(id, by);
       return;
     }
     if (before === by) return;
     duo.owners.set(id, by);
-    if (by === duo.seat) {
-      counts.you++;
-      counts.friend--;
-      player.joy = Sprites.cheer(player.joy);
-    } else {
-      duo.overturned++;
-      counts.you--;
-      counts.friend++;
-      friend.joy = Sprites.cheer(friend.joy);
-    }
+    if (before === duo.seat) duo.overturned++;
+    addHaul(before, -1);
+    addHaul(by, 1);
+    cheerFor(by);
     updateHud();
     if (state === 'over') finishTogether();
   }
 
-  // ---- telling the other phone ----
+  // The host says who has the golden acorn.
+  function goldenHere(by) {
+    if (typeof by !== 'number') return;
+    if (by === duo.seat) {
+      if (golden === 'you') return;
+      golden = 'you';
+      duo.goldenSeat = by;
+      el('golden').hidden = false;
+      measureHud();
+    } else {
+      if (golden === 'friend' && duo.goldenSeat === by) return;
+      friendFoundGolden(by);
+    }
+    if (state === 'over') finishTogether();
+  }
 
-  // An acorn taken on this phone: the host says whose it is; the guest says
-  // it took it, and counts it as its own until the host says otherwise.
-  function tellTaken(acorn, who) {
+  // ---- telling the others ----
+
+  // An acorn taken on this phone: the host says whose it is; a guest says it
+  // took it, and counts it as its own until the host says otherwise.
+  function tellTaken(acorn, who, seat) {
     if (duo.role === 'host') {
-      const by = who === 'you' ? 0 : 1;
+      const by = who === 'you' ? 0 : seat;
       duo.owners.set(acorn.id, by);
-      if (by === 0) duo.takenAt.set(acorn.id, now());
+      if (by === 0) duo.claimedAt.set(acorn.id, now());
       duo.host.send({ t: 'taken', id: acorn.id, by });
     } else if (who === 'you') {
       duo.owners.set(acorn.id, duo.seat);
@@ -1334,20 +1588,22 @@
   }
 
   function tellGolden() {
+    duo.goldenSeat = duo.seat;
     if (duo.role === 'host') {
       duo.goldenAt = now();
       duo.host.send({ t: 'golden', by: 0 });
     } else duo.guest.send({ t: 'golden', s: +now().toFixed(3) });
   }
 
-  // The other player found the golden acorn first.
-  function friendFoundGolden() {
-    const hadIt = golden === 'you';
+  // Another player found the golden acorn (first, as far as is known yet).
+  function friendFoundGolden(seat) {
+    const sparkled = golden !== null;   // its sparkle has been seen here already
     golden = 'friend';
+    duo.goldenSeat = seat;
     el('golden').hidden = true;
     measureHud();
-    friend.joy = Sprites.cheer(friend.joy);
-    if (!hadIt) {
+    cheerFor(seat);
+    if (!sparkled) {
       burst(cabin.golden, '#ffe066', 46);
       faintly('golden', cabin.golden);
     }
@@ -1356,14 +1612,19 @@
   // ---- the end, and leaving ----
 
   function finishTogether() {
-    const name = otherName();
-    el('verdict').textContent = counts.you > counts.friend ? 'You win!' : counts.you < counts.friend ? `${name} wins!` : 'A draw!';
-    el('result').textContent = `You gathered ${counts.you} and ${name} ${counts.friend}, in ${formatTime(time)}`;
-    el('golden-found').textContent = golden === 'you' ? 'and you found the golden acorn!' : `${name} found the golden acorn.`;
-    el('golden-found').hidden = golden === null;
+    const seats = [duo.seat, ...otherSeats()];
+    const most = Math.max(...seats.map(haulOf));
+    const leaders = seats.filter((seat) => haulOf(seat) === most);
+    el('verdict').textContent = leaders.length > 1 ? 'A draw!' : leaders[0] === duo.seat ? 'You win!' : `${nameOf(leaders[0])} wins!`;
+    // The others from most to fewest: "You gathered 12 and Sam 10", or "You gathered 12, Jo 14 and Sam 10".
+    const others = otherSeats().sort((a, b) => haulOf(b) - haulOf(a) || a - b).map((seat) => `${nameOf(seat)} ${haulOf(seat)}`);
+    el('result').textContent = `You gathered ${counts.you}${others.length > 1 ? ', ' : others.length ? ' and ' : ''}${inWords(others)}, in ${formatTime(time)}`;
+    el('golden-found').textContent = golden === 'you' ? 'and you found the golden acorn!' : `${nameOf(duo.goldenSeat)} found the golden acorn.`;
+    // (Not said of someone who has since left.)
+    el('golden-found').hidden = golden === null || (golden === 'friend' && !duo.players[duo.goldenSeat]);
     for (const id of ['rivals', 'best']) el(id).hidden = true;
     el('again').hidden = duo.role !== 'host';
-    el('over-wait').textContent = `Waiting for ${name} to start another round.`;
+    el('over-wait').textContent = `Waiting for ${nameOf(0)} to start another round.`;
     el('over-wait').hidden = duo.role === 'host';
     el('over-menu').textContent = 'Leave game';
     el('hud').hidden = true;
@@ -1371,13 +1632,14 @@
     el('info').hidden = false;
     el('mute-menu').hidden = false;
     el(duo.role === 'host' ? 'again' : 'over-menu').focus();
-    if (duo.role === 'host') duo.host.send({ t: 'end', counts: [counts.you, counts.friend], time: +time.toFixed(2) });
+    if (duo.role === 'host') duo.host.send({ t: 'end', hauls: duo.players.map((someone, seat) => (someone ? haulOf(seat) : 0)), time: +time.toFixed(2) });
     if (auto) {
-      document.body.dataset.result = `you=${counts.you} friend=${counts.friend} total=${total} time=${time.toFixed(1)} golden=${golden === 'you' ? 1 : golden === 'friend' ? 2 : 0}`;
+      const theirs = otherSeats().reduce((sum, seat) => sum + haulOf(seat), 0);
+      document.body.dataset.result = `you=${counts.you} friend=${theirs} total=${total} time=${time.toFixed(1)} golden=${golden === 'you' ? 1 : golden === 'friend' ? 2 : 0}`;
     }
   }
 
-  // Leave game: the other phone is told, and this one goes back to the start.
+  // Leave game: the others are told, and this phone goes back to the start.
   function leaveTogether() {
     if (!duo) return;
     if (duo.role === 'host') duo.host.close('ended');
@@ -1386,8 +1648,8 @@
     toMenu();
   }
 
-  // This phone's part in the two-player game is over. The host's room stays
-  // open a moment, so that its last word ("closed") reaches the other phone.
+  // This phone's part in the game with friends is over. The host's room
+  // stays open a moment, so that its last word ("closed") reaches the others.
   function endTogether() {
     if (!duo) return;
     const was = duo;
@@ -1398,16 +1660,15 @@
     hudShown = '';
   }
 
-  // The guest said goodbye part-way through a round.
-  function otherLeft() {
-    const name = otherName();
+  // The last of the others said goodbye part-way through a game.
+  function otherLeft(name) {
     duo.host.close('ended');
     endTogether();
     toMenu();
     showDuo('ended', `${name} left the game.`, true);
   }
 
-  // The screen stays on during a two-player game, as a phone that sleeps
+  // The screen stays on during a game with friends, as a phone that sleeps
   // drops out. The browser lets the lock go whenever the page is hidden, so
   // it is asked for again each time the page comes back (WordGridGame's way).
   let wakeLock = null;
@@ -1435,7 +1696,7 @@
     askingLock = false;
   }
 
-  // ---- the Two players panel ----
+  // ---- the Play with friends panel ----
 
   let duoBox = 'choose';   // what it shows: 'choose', 'host', 'join' or 'ended'
 
@@ -1452,19 +1713,38 @@
     el('duo-choose').hidden = kind !== 'choose';
     el('duo-name-row').hidden = !(kind === 'choose' || (kind === 'join' && !duo));
     el('duo-hosting').hidden = !hosting;
+    el('duo-starting').hidden = !hosting;
     el('duo-joining').hidden = !(kind === 'join' && !duo);
+    el('duo-players').hidden = !(hosting || joined);
+    if (hosting || joined) showPlayers();
     if (hosting) {
       el('duo-code').textContent = duo.code || '....';
       el('duo-share').hidden = !duo.code;
-      const there = duo.host.guest;
-      el('duo-friend').textContent = there && there.here ? `${there.name} is here. Choose a game:` : 'Waiting for a friend to join...';
-      el('duo-race').disabled = !(there && there.here);
-      el('duo-explore').disabled = !(there && there.here);
+      const friends = duo.players.filter((someone, seat) => seat > 0 && someone && someone.here).length;
+      el('duo-friend').textContent = !friends ? 'Waiting for friends to join...'
+        : friends < Duo.MAX_PLAYERS - 1 ? 'Choose a game, or wait for more to join.' : 'Four players: the game is full. Choose a game:';
+      el('duo-race').disabled = !friends;
+      el('duo-explore').disabled = !friends;
     }
     if (joined) {
-      el('duo-status').textContent = `Connected to ${duo.names[0] || 'the other phone'}'s game. Waiting for them to choose a game.`;
+      el('duo-status').textContent = `Connected to ${nameOf(0)}'s game. Waiting for them to choose a game.`;
       el('duo-status').classList.remove('warn');
     }
+  }
+
+  // Who is in the game, each beside a head in their squirrel's colour, so
+  // everyone knows which is theirs before the start.
+  function showPlayers() {
+    const list = el('duo-players');
+    list.textContent = '';
+    duo.players.forEach((someone, seat) => {
+      if (!someone) return;
+      const item = document.createElement('li');
+      item.innerHTML = headPicture(seat);
+      item.append(seat === duo.seat ? `${someone.name} (you)` : someone.name);
+      item.classList.toggle('away', !someone.here);
+      list.append(item);
+    });
   }
 
   function closeDuo() {
@@ -1493,24 +1773,29 @@
   function needName() {
     el('duo-name').classList.add('want');
     el('duo-name').focus();
-    showDuo(duoBox, 'Type your name first: the other player sees it.', true);
+    showDuo(duoBox, 'Type your name first: the others see it.', true);
   }
 
-  // The host knows this tab again by its token, which lasts as long as the tab.
+  // The host knows this tab again by its token, which lasts as long as the
+  // tab. (A test squirrel's page keeps its own: the test page's frames share
+  // one tab's storage.)
   let spareToken = '';
   function tabToken() {
     const fresh = () => `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-    try {
-      let token = sessionStorage.getItem(TOKEN_KEY);
-      if (!token) {
-        token = fresh();
-        sessionStorage.setItem(TOKEN_KEY, token);
+    if (!auto) {
+      try {
+        let token = sessionStorage.getItem(TOKEN_KEY);
+        if (!token) {
+          token = fresh();
+          sessionStorage.setItem(TOKEN_KEY, token);
+        }
+        return token;
+      } catch (error) {
+        // Storage refused: the page's own, below.
       }
-      return token;
-    } catch (error) {
-      if (!spareToken) spareToken = fresh();
-      return spareToken;
     }
+    if (!spareToken) spareToken = fresh();
+    return spareToken;
   }
 
   // The address that opens this game's Join panel, sent with the phone's own
@@ -1526,7 +1811,7 @@
         await navigator.share({ title: 'Squirrel Game', text: `Race me in Squirrel Game: the code is ${duo.code}.`, url: url.href });
       } else {
         await navigator.clipboard.writeText(url.href);
-        showDuo('host', 'Link copied. Paste it into a message to your friend.');
+        showDuo('host', 'Link copied. Paste it into a message to your friends.');
       }
     } catch (error) {
       if (!error || error.name !== 'AbortError') showDuo('host', url.href);
@@ -1539,20 +1824,35 @@
   const friendMoved = { most: 0 };
   function reportTogether() {
     if (window.parent === window) return;
+    const others = {};
+    for (const other of shownOthers()) others[other.seat] = { x: +other.x.toFixed(1), y: +other.y.toFixed(1) };
+    const first = Number(params.get('first'));
     window.parent.postMessage({
       duoReport: {
-        role: duo ? duo.role : null, code: duo ? duo.code : '', at: Date.now(), state, mode, paused, time: +time.toFixed(2),
+        role: duo ? duo.role : null, seat: duo ? duo.seat : null, code: duo ? duo.code : '', at: Date.now(), state, mode, paused, time: +time.toFixed(2),
         me: { x: +player.x.toFixed(1), y: +player.y.toFixed(1) },
-        friend: duo && friend.seen ? { x: +friend.x.toFixed(1), y: +friend.y.toFixed(1) } : null,
+        others,
         jump: +friendMoved.most.toFixed(2),
         acorns: acorns.map((acorn) => acorn.id).sort((a, b) => a - b),
         grown: acorns.filter((acorn) => acorn.id >= total).map((acorn) => [acorn.id, acorn.x, acorn.y]),
-        counts: { you: counts.you, friend: counts.friend }, golden, inRound: Boolean(duo && duo.inRound),
-        round: duo ? duo.round : 0, names: duo ? duo.names : null, overturned: duo ? duo.overturned : 0, decisions: duo ? duo.decisions.slice(-30) : [],
-        firstOwner: duo && params.has('first') ? duo.owners.get(Number(params.get('first'))) : null,
+        hauls: duo ? duo.players.map((someone, seat) => (someone ? haulOf(seat) : null)) : [],
+        golden: !duo || golden === null ? null : golden === 'you' ? duo.seat : duo.goldenSeat,
+        inRound: Boolean(duo && duo.inRound),
+        round: duo ? duo.round : 0, players: duo ? duo.players.map((someone) => someone && someone.name) : null,
+        overturned: duo ? duo.overturned : 0, decisions: duo ? duo.decisions.slice(-30) : [],
+        // Who has the &first acorn, and when (Date.now()) this squirrel really reached it, if it did.
+        firstOwner: duo && params.has('first') && duo.owners.has(first) ? duo.owners.get(first) : null,
+        firstAt: auto.firstAt || null,
+        owners: duo ? [...duo.owners].sort((a, b) => a[0] - b[0]) : [],
+        goAt: duo ? duo.goAt || null : null,   // when (Date.now()) it said Go
         status: el('duo-status').textContent, pausedBy: el('paused').hidden ? null : el('paused-by').textContent,
         result: state === 'over' ? `${el('verdict').textContent} / ${el('result').textContent} / ${el('golden-found').hidden ? '' : el('golden-found').textContent}` : null,
-        hud: el('acorns').textContent, hudFits: el('hud-row').scrollWidth <= el('hud-row').clientWidth + 1,
+        hud: el('acorns').textContent + (el('others').hidden ? '' : ` | ${el('others').textContent}`),
+        heads: el('hud').querySelectorAll('.head').length,
+        hudFits: el('hud-row').scrollWidth <= el('hud-row').clientWidth + 1,
+        // The others' counts, with three or four players: clear of the map, and inside the window.
+        othersFit: el('others').hidden || (el('others').getBoundingClientRect().right <= minimap.getBoundingClientRect().left - 4
+          && el('others').getBoundingClientRect().top >= el('hud-row').getBoundingClientRect().bottom),
         view: cameraView(),
       },
     }, '*');
@@ -1575,7 +1875,7 @@
   // ---- pause, help, and back to the start ----
 
   // Everything stops (the squirrel, the animals, the clock, the sounds) under
-  // a menu. In a two-player game both phones pause, whichever asked.
+  // a menu. In a game with friends every phone pauses, whichever asked.
   function pause() {
     if (state !== 'playing' || paused) return;
     if (duo && duo.role === 'host') setPause(true, 0);
@@ -1594,15 +1894,14 @@
     } else resumeHere();
   }
 
-  // The pause menu, and who it was: 'you', 'friend' (the other player), or
-  // 'waiting' (for the other phone, which has gone quiet).
-  function pauseHere(by) {
+  // The pause menu, and who it was: 'you', another player (by seat), or
+  // 'waiting' (for the phones in `waits`, by seat, which have gone quiet).
+  function pauseHere(by, waits = []) {
     const wasPaused = paused;
     paused = true;
     Input.release();
     sounds.pause();
-    const name = duo ? duo.names[1 - duo.seat] || 'the other player' : '';
-    el('paused-by').textContent = by === 'friend' ? `Paused by ${name}` : by === 'waiting' ? `Waiting for ${name}...` : '';
+    el('paused-by').textContent = typeof by === 'number' ? `Paused by ${nameOf(by)}` : by === 'waiting' ? `Waiting for ${inWords(waits.map(nameOf))}...` : '';
     el('paused-by').hidden = !el('paused-by').textContent;
     el('restart').hidden = Boolean(duo);
     el('to-menu').textContent = duo ? 'Leave game' : 'Main menu';
@@ -1614,8 +1913,8 @@
     paused = false;
     for (const panel of ['paused', 'rules']) el(panel).hidden = true;
     if (!document.hidden) sounds.resume();
-    // The two phones' clocks stood still for different lengths of time.
-    if (duo) duo.follow.clear();
+    // The phones' clocks stood still for different lengths of time.
+    if (duo) for (const other of duo.others.values()) other.follow.clear();
   }
 
   // Back to the start screen, to choose the race or Explore again.
@@ -1698,7 +1997,7 @@
   });
   window.addEventListener('resize', resize);
 
-  // The Two players panel.
+  // The Play with friends panel.
   try {
     el('duo-name').value = localStorage.getItem(NAME_KEY) || '';
   } catch (error) {
@@ -1726,10 +2025,11 @@
   }
 
   resize();
-  // Test hooks: &duo=host (with &code, &name, &start=race|explore) or
-  // &duo=join (with &code, &name) play a two-player game through the test
-  // page; &report sends it how things stand ten times a second, and it can
-  // ask this phone to pause, resume or leave.
+  // Test hooks: &duo=host (with &code, &name, &start=race|explore, and
+  // &players=N to start once N phones are in, 2 by default) or &duo=join
+  // (with &code, &name) play a game with friends through the test page;
+  // &report sends it how things stand ten times a second, and it can ask
+  // this phone to pause, resume, leave or play again.
   if (auto && params.has('duo')) {
     el('duo-name').value = params.get('name') || (params.get('duo') === 'host' ? 'Host' : 'Guest');
     if (params.get('duo') === 'host') hostGame();
