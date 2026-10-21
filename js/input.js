@@ -17,8 +17,11 @@ const Input = (() => {
   const knobEl = document.getElementById('knob');
   let stick = null;   // { id, originX, originY, x, y } with x, y in -1..1
 
+  // Typing in a box (a name, a code) is left alone.
+  const typing = (event) => event.target instanceof Element && event.target.closest('input, textarea') !== null;
+
   window.addEventListener('keydown', (event) => {
-    if (KEYS[event.code]) {
+    if (KEYS[event.code] && !typing(event)) {
       held.add(event.code);
       event.preventDefault();
     }

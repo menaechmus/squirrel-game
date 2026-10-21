@@ -62,7 +62,9 @@ const Hud = (() => {
 
   // Draw the minimap: the miniature, a frame round the part of the park that
   // is on screen (`view`, in park pixels), and a pulsing dot for the squirrel.
-  function drawMinimap(g, miniature, level, player, view, clock) {
+  // `others` are the other players' squirrels (two-player games), { x, y,
+  // color }: a steady dot in each one's colour, with a light rim.
+  function drawMinimap(g, miniature, level, player, view, clock, others = []) {
     const cell = level.size / MINIMAP_SIZE;
     g.drawImage(miniature, 0, 0);
 
@@ -75,6 +77,15 @@ const Hud = (() => {
     g.fillRect(left, bottom, right - left + 1, 1);
     g.fillRect(left, top + 1, 1, bottom - top - 1);
     g.fillRect(right, top + 1, 1, bottom - top - 1);
+
+    for (const other of others) {
+      const ox = clamp(Math.round(other.x / cell) - 1, 1, MINIMAP_SIZE - 3);
+      const oy = clamp(Math.round((other.y - 6) / cell) - 1, 1, MINIMAP_SIZE - 3);
+      g.fillStyle = '#f4f0e8';
+      g.fillRect(ox - 1, oy - 1, 4, 4);
+      g.fillStyle = other.color;
+      g.fillRect(ox, oy, 2, 2);
+    }
 
     // A two-pixel dot with a dark rim, centred on the squirrel.
     const x = clamp(Math.round(player.x / cell) - 1, 1, MINIMAP_SIZE - 3);

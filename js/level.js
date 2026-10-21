@@ -704,13 +704,15 @@ const Level = (() => {
 
     // A spot for a new acorn, as Explore grows one for each taken: one that
     // keeps the acorn rules, at least 20 px from the acorns lying about, and
-    // `margin` px outside `view` (the part of the park on screen), so it never
-    // appears in front of the player. Null if none turned up.
+    // `margin` px outside `view` (the part of the park on screen; or a list of
+    // views, one for each player), so it never appears in front of a player.
+    // Null if none turned up.
     function newAcornSpot(random, lying, view, margin = 24) {
+      const views = Array.isArray(view) ? view : [view];
       for (let attempt = 0; attempt < 300; attempt++) {
         const x = Math.round(BORDER + 12 + random() * (SIZE - 2 * BORDER - 24));
         const y = Math.round(BORDER + 24 + random() * (SIZE - 2 * BORDER - 36));
-        if (x > view.x - margin && x < view.x + view.w + margin && y > view.y - margin && y < view.y + view.h + margin) continue;
+        if (views.some((each) => x > each.x - margin && x < each.x + each.w + margin && y > each.y - margin && y < each.y + each.h + margin)) continue;
         if (lying.some((acorn) => Math.hypot(acorn.x - x, acorn.y - y) < 20)) continue;
         if (acornFits(x, y)) return { x, y };
       }

@@ -421,6 +421,8 @@ const Sprites = (() => {
     shadow,
     squirrel: squirrel(),
     greySquirrel: squirrel({ o: '#a3a3ae', O: '#6f6f7c', c: '#eeeef2' }),
+    // The second player's squirrel in a two-player game (1.13): a black squirrel.
+    blackSquirrel: squirrel({ o: '#4f4842', O: '#332d29', c: '#a2968a' }),
     idleFrame,
     cheer,
     joyLift,

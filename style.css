@@ -101,6 +101,83 @@ body {
   image-rendering: pixelated;
 }
 
+/* Two players (1.13): the boxes for a name and a code, the code itself, and
+   the squirrels' heads in the top bar. A box's text is at least 16px, so a
+   phone does not zoom in on it. */
+.panel .field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.panel input[type="text"] {
+  width: 9em;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: max(16px, 1em);
+  text-align: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid #fff;
+  border-radius: 0;
+}
+
+.panel input.want {
+  border-color: #f0c670;
+}
+
+.panel .stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(6px, 2.6vh, 14px);
+}
+
+.panel .stack p {
+  margin: 0;
+}
+
+.panel .code {
+  font-size: 1.5em;
+  letter-spacing: 0.15em;
+}
+
+#duo-status.warn {
+  color: #ffc4a8;
+}
+
+/* "3, 2, 1, Go!" before a two-player round. */
+#countdown {
+  position: absolute;
+  top: 38%;
+  right: 0;
+  left: 0;
+  text-align: center;
+  font-size: clamp(48px, 18vmin, 120px);
+  color: #f0c670;
+  text-shadow: 4px 4px 0 #6a4322;
+  pointer-events: none;
+}
+
+#hud .head {
+  display: inline-block;
+  width: 15px;
+  height: 12px;
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
+#hud .acorn-icon {
+  display: inline-block;
+  width: 12px;
+  height: 15px;
+  margin: 0 3px 0 6px;
+  vertical-align: -2px;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
 #mute.off .waves,
 #mute-menu.off .waves,
 #mute:not(.off) .cross,
@@ -178,6 +255,14 @@ body {
 .panel button:active {
   transform: translateY(4px);
   box-shadow: 0 2px 0 #6a4322;
+}
+
+/* A choice that cannot be made yet (Race and Explore, until a friend has joined). */
+.panel button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
+  box-shadow: 0 6px 0 #6a4322;
 }
 
 /* The small "i" in the corner of the start and end screens, and the About panel it opens. */

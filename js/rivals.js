@@ -7,6 +7,8 @@
 // The game hands in a `world` to act on:
 //   level, player, acorns() -> list, take(acorn, who), random(), sound(name, at),
 //   view() -> the part of the park on screen, as { x, y, w, h },
+//   and optionally thieves: false, which leaves the jay, the groundhog thief and
+//   the grey squirrels out and keeps only the wildlife for show (two-player games),
 //   puff(spot) -> throw up a little dirt there,
 //   wind(x, y) -> how hard the wind is pushing there, as Effects.lean gives it
 
@@ -114,6 +116,7 @@ const Rivals = (() => {
 
   function create(world) {
     const { level, player } = world;
+    const thieves = world.thieves !== false;
     const between = ([min, max]) => min + world.random() * (max - min);
     const near = (a, b, radius) => Math.hypot(a.x - b.x, a.y - b.y) < radius;
     // Is an acorn, or a spot beside one, on screen: clear of the edges and of the score bar?
@@ -231,7 +234,7 @@ const Rivals = (() => {
       const corners = [{ x: inset, y: inset }, { x: level.size - inset, y: level.size - inset },
         { x: level.size - inset, y: inset }, { x: inset, y: level.size - inset }];
       squirrels = [];
-      for (let i = 0; i < TUNING.squirrel.count; i++) {
+      for (let i = 0; i < (thieves ? TUNING.squirrel.count : 0); i++) {
         const squirrel = {
           x: corners[i % 4].x, y: corners[i % 4].y, facing: 'down', moving: false, hop: 0,
           idle: i * 1.3,   // staggered, so they don't sniff in step
@@ -964,9 +967,11 @@ const Rivals = (() => {
         drift.y += (pace(player.y, lastSpot.y) - drift.y) * ease;
         lastSpot = { x: player.x, y: player.y };
       }
-      updateJay(dt);
-      updateHog(dt);
-      for (const squirrel of squirrels) updateSquirrel(squirrel, dt);
+      if (thieves) {
+        updateJay(dt);
+        updateHog(dt);
+        for (const squirrel of squirrels) updateSquirrel(squirrel, dt);
+      }
       const view = world.view();
       updateFlyBys(dt, view);
       updatePerchers(dt, view);
