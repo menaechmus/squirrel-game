@@ -112,6 +112,10 @@
   const rivalsAlone = Rivals.create(world);
   const rivalsTogether = Rivals.create(Object.assign({}, world, { thieves: false }));
   let rivals = rivalsAlone;
+  // Fish and ducks (1.15), only for show. Each round they are seeded from a
+  // run of random numbers of their own, never the thieves'.
+  const waterLife = WaterLife.create({ level, player, view: cameraView, splash });
+  const waterSeeds = seededRandom((params.has('seed') ? Number(params.get('seed')) : auto ? 1 : Date.now()) ^ 0x5bd1e995);
 
   // ---- screen ----
 
@@ -175,7 +179,7 @@
       water: level.nearestWater(player.x, player.y),
       falls: { distance: Math.hypot(level.falls.x - player.x, level.falls.y - player.y), dx: level.falls.x - player.x },
       breeze: gust * Math.min(1, trees / 5),
-      voices: rivals.voices(),
+      voices: rivals.voices().concat(waterLife.voices()),
       fire: { distance: Math.hypot(cabin.hearth.x - player.x, cabin.hearth.y - player.y), dx: cabin.hearth.x - player.x },
     });
   }
@@ -303,6 +307,8 @@
     // host's just left of it, the second just right, the others further out.
     player.x = level.spawn.x + (duo ? START_SPOTS[duo.seat] : 0);
     player.y = level.spawn.y;
+    // Test hook: &spot=x,y starts the squirrel there instead (by the water, say).
+    if (auto && params.has('spot')) [player.x, player.y] = params.get('spot').split(',').map(Number);
     player.facing = 'down';
     player.idle = 0;
     player.sniffRound = -1;
@@ -326,6 +332,7 @@
     state = 'playing';
     rivals = duo ? rivalsTogether : rivalsAlone;
     rivals.reset();
+    waterLife.reset(Math.floor(waterSeeds() * 0x7fffffff));
     Input.release();
     for (const panel of ['start', 'over', 'about', 'paused', 'rules', 'duo', 'countdown']) el(panel).hidden = true;
     el('info').hidden = true;   // the About button is only for the start and end screens
@@ -341,6 +348,14 @@
     for (let i = 0; i < 8; i++) {
       const angle = (i / 8) * Math.PI * 2;
       particles.push({ x: acorn.x, y: acorn.y - 6, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 30, life: 0.4, color });
+    }
+  }
+
+  // A few drops of water thrown up where a fish leaps or a duck comes down.
+  function splash(spot) {
+    for (let i = 0; i < 6; i++) {
+      const sideways = i - 2.5;
+      particles.push({ x: spot.x + sideways, y: spot.y - 1, vx: sideways * 10, vy: -38 - (i % 3) * 10, life: 0.3 + (i % 2) * 0.12, color: i % 2 ? '#ffffff' : '#bfe4ff' });
     }
   }
 
@@ -646,6 +661,7 @@
 
     // After the round the rivals carry on, so a jay still flies off with its prize.
     rivals.update(dt);
+    waterLife.update(dt);
     if (sounds.context()) listen(dt);
     if (duo) animateOthers(dt);
     if (state !== 'playing') return;
@@ -763,8 +779,24 @@
     ctx.fillStyle = '#2a6e33';
     ctx.fillRect(0, 0, viewW, viewH);
     ctx.drawImage(ground, -camX, -camY);
-    ctx.drawImage(pond.frames[effects.pondFrame(clock)], pond.x - camX, pond.y - camY);
-    ctx.drawImage(brook.frames[Scenery.flowFrame(clock)], brook.x - camX, brook.y - camY);
+    const still = effects.pondFrame(clock);
+    const flowing = Scenery.flowFrame(clock);
+    ctx.drawImage(pond.frames[still], pond.x - camX, pond.y - camY);
+    ctx.drawImage(brook.frames[flowing], brook.x - camX, brook.y - camY);
+    // Fish under the water, faint, with the water's sparkles over them; then
+    // rings spreading from splashes and wakes (1.15).
+    for (const fish of waterLife.beneath()) {
+      ctx.globalAlpha = fish.alpha;
+      ctx.drawImage(fish.sprite, fish.x - camX, fish.y - camY);
+    }
+    ctx.globalAlpha = 1;
+    ctx.drawImage(pond.surface[still], pond.x - camX, pond.y - camY);
+    ctx.drawImage(brook.surface[flowing], brook.x - camX, brook.y - camY);
+    for (const ring of waterLife.ripples()) {
+      ctx.globalAlpha = ring.alpha;
+      ctx.drawImage(ring.sprite, ring.x - camX, ring.y - camY);
+    }
+    ctx.globalAlpha = 1;
     for (const decal of rivals.decals()) ctx.drawImage(decal.sprite, decal.x - camX, decal.y - camY);
     const lit = Scenery.flicker(clock);
     const cabinLeft = cabin.x - (cabinArt.frames[0].width >> 1) - camX;
@@ -784,7 +816,7 @@
     for (const acorn of acorns) {
       ctx.drawImage(Sprites.shadowSmall, acorn.x - 5 - camX, acorn.y - 2 - camY);
     }
-    for (const spot of rivals.shadows()) {
+    for (const spot of rivals.shadows().concat(waterLife.shadows())) {
       ctx.drawImage(Sprites.shadowSmall, spot.x - 5 - camX, spot.y - 2 - camY);
     }
 
@@ -815,7 +847,7 @@
       const bob = Math.round(Math.sin(clock * 4 + acorn.phase) * 1.5);
       things.push({ sprite: Sprites.acorn, x: acorn.x - 4 - camX, y: acorn.y - 12 - bob - camY, depth: acorn.y });
     }
-    for (const thing of rivals.things(clock)) {
+    for (const thing of rivals.things(clock).concat(waterLife.things())) {
       things.push({ sprite: thing.sprite, x: thing.x - camX, y: thing.y - camY, depth: thing.depth, clip: thing.clip });
     }
     for (const other of others) {
@@ -856,7 +888,7 @@
 
     effects.drawLeaves(ctx, camX, camY);
     effects.drawSmoke(ctx, camX, camY, cabin.chimney, clock);
-    for (const flyer of rivals.flyers()) ctx.drawImage(flyer.sprite, flyer.x - camX, flyer.y - camY);
+    for (const flyer of rivals.flyers().concat(waterLife.flyers())) ctx.drawImage(flyer.sprite, flyer.x - camX, flyer.y - camY);
     effects.drawClouds(ctx, camX, camY, viewW, viewH);
 
     for (const particle of particles) {

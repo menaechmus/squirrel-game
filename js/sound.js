@@ -1,8 +1,8 @@
 // Sound: the game's beeps, and the park's own quiet sounds round the squirrel:
 // water babbling and bubbling, the rush of the waterfall, leaves in a gust,
 // jays singing, groundhogs scratching at the dirt, the cabin's fire crackling
-// and its door creaking. Everything is made in code with the Web Audio API;
-// nothing is loaded.
+// and its door creaking, ducks quacking and splashes. Everything is made in
+// code with the Web Audio API; nothing is loaded.
 
 const Sound = (() => {
   // Each beep is a few square-wave notes: [frequency, delay, length]. The
@@ -33,6 +33,10 @@ const Sound = (() => {
   // third of a beep.
   const FIRE = { near: 14, reach: 120, level: 0.06, crackle: 0.09, cracklesPerSecond: 7 };
   const CREAK = { level: 0.12 };
+  // Ducks quack now and then, about as loud as a jay's song (1.15); a fish
+  // leaping and a duck coming down or taking off splash, softly.
+  const QUACK = { level: 0.05, every: [5, 14] };
+  const SPLASH = { level: 0.05 };
   const FADE = 0.03;                               // switching on or off takes about three times this
 
   // 1 within `near`, falling to 0 at `reach`, and faster further out.
@@ -249,6 +253,55 @@ const Sound = (() => {
       oscillator.stop(start + length + 0.02);
     }
 
+    // A duck's quack: one, two or three short, nasal calls that fall in pitch.
+    function quack(start, volume, side) {
+      const out = panned(side);
+      const calls = random() < 0.45 ? 1 : random() < 0.75 ? 2 : 3;
+      let at = start;
+      const base = 300 + random() * 90;
+      for (let i = 0; i < calls; i++) {
+        const length = 0.1 + random() * 0.05;
+        const oscillator = context.createOscillator();
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(base, at);
+        oscillator.frequency.exponentialRampToValueAtTime(base * 0.72, at + length);
+        // Through the bill: a band of the buzz, not all of it.
+        const filter = context.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1100 + random() * 300;
+        filter.Q.value = 2.2;
+        const gain = context.createGain();
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.exponentialRampToValueAtTime(QUACK.level * volume, at + 0.015);
+        gain.gain.setValueAtTime(QUACK.level * volume, at + length * 0.55);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+        oscillator.connect(filter).connect(gain).connect(out);
+        oscillator.start(at);
+        oscillator.stop(at + length + 0.01);
+        at += length + 0.05 + random() * 0.05;
+      }
+    }
+
+    // A splash: a soft burst of spray, and a drop or two falling back.
+    function splash(start, volume, side) {
+      const out = panned(side);
+      const length = 0.12 + random() * 0.06;
+      const source = context.createBufferSource();
+      source.buffer = parts.noise;
+      const filter = context.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 1800 + random() * 1200;
+      filter.Q.value = 0.9;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(SPLASH.level * volume, start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+      source.connect(filter).connect(gain).connect(out);
+      source.start(start, random() * 1.8, length + 0.01);
+      const drops = 1 + Math.floor(random() * 2);
+      for (let i = 0; i < drops; i++) bubble(start + 0.08 + random() * 0.12, volume * 0.8, side);
+    }
+
     // A bubble rising in the water: a soft blip that slides up.
     function bubble(start, volume, side) {
       const length = 0.04 + random() * 0.04;
@@ -279,8 +332,10 @@ const Sound = (() => {
     // { distance, dx } to the nearest water and to the foot of the waterfall;
     // `scene.breeze` (0 to 1) how hard the leaves round it are moving; and
     // `scene.voices` the animals up to something: { who, kind, x, y }, kind
-    // being 'sitting', 'landing' or 'flying' (jays) or 'digging' (groundhogs);
-    // and `scene.fire` { distance, dx } to the cabin's hearth, if there is one.
+    // being 'sitting', 'landing' or 'flying' (jays), 'digging' (groundhogs),
+    // 'duck', 'duck-landing' or 'duck-flying' (mallards), or 'splash' (a fish
+    // leaping, a duck coming down or taking off; heard once); and
+    // `scene.fire` { distance, dx } to the cabin's hearth, if there is one.
     function update(dt, scene, now = context ? context.currentTime : 0) {
       if (!parts) return;
       const ahead = now + 0.02;
@@ -334,6 +389,19 @@ const Sound = (() => {
           // Once per pass, decided as it comes close: half the jays flying past call.
           was.called = true;
           if (random() < 0.5) song(ahead, volume, side);
+        } else if (voice.kind === 'duck') {
+          // A duck on the water quacks now and then, and as it settles after landing.
+          if (was.kind === null) was.next = now + QUACK.every[0] * random() * 1.5;
+          if (volume > 0 && (was.kind === 'duck-landing' || now >= was.next)) {
+            quack(ahead, volume, side);
+            was.next = now + QUACK.every[0] + random() * (QUACK.every[1] - QUACK.every[0]);
+          }
+        } else if ((voice.kind === 'duck-flying' || voice.kind === 'duck-landing') && !was.called && distance < CALL.reach * 0.6) {
+          // In the air it may call once as it passes close.
+          was.called = true;
+          if (random() < 0.4) quack(ahead, volume, side);
+        } else if (voice.kind === 'splash' && was.kind === null) {
+          if (volume > 0) splash(ahead, volume, side);   // heard once, as it happens
         }
         was.kind = voice.kind;
         still.set(voice.who, was);

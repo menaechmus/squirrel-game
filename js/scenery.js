@@ -1192,7 +1192,30 @@ const Scenery = (() => {
     };
   }
 
-  // The pond as four frames.
+  // A picture of water, and its sparkles (the glints, the shimmer along the
+  // shore, the ripples by the stones) again as a see-through layer of their
+  // own, to lay over the fish swimming under them (1.15). One pass makes both.
+  const SPARKLES = new Set(['#b6dcff', '#d4eeff']);
+  function waterPicture(w, h, colorAt) {
+    const sparkles = [];   // where each sparkle is, and its colour, as the water is painted
+    const frame = pixelCanvas(w, h, (x, y) => {
+      const color = colorAt(x, y);
+      if (SPARKLES.has(color)) sparkles.push(x + y * w, color);
+      return color;
+    });
+    // Only those pixels, on a clear picture (their colours are parsed already).
+    const surface = canvas(w, h);
+    const g = surface.getContext('2d');
+    const image = g.createImageData(w, h);
+    for (let i = 0; i < sparkles.length; i += 2) {
+      const parts = parsedColors[sparkles[i + 1]];
+      image.data.set(parts, sparkles[i] * 4);
+    }
+    g.putImageData(image, 0, 0);
+    return { frame, surface };
+  }
+
+  // The pond as four frames, and its sparkles for each.
   function buildPond(level) {
     const pond = level.pond;
     const water = pondWater(pond, seededRandom(55));
@@ -1202,8 +1225,13 @@ const Scenery = (() => {
     const w = Math.ceil(pond.a * 2 + pad * 2);
     const h = Math.ceil(pond.b * 2 + pad * 2);
     const frames = [];
-    for (let f = 0; f < 4; f++) frames.push(pixelCanvas(w, h, (x, y) => water(x + left, y + top, f)));
-    return { x: left, y: top, frames };
+    const surface = [];
+    for (let f = 0; f < 4; f++) {
+      const made = waterPicture(w, h, (x, y) => water(x + left, y + top, f));
+      frames.push(made.frame);
+      surface.push(made.surface);
+    }
+    return { x: left, y: top, frames, surface };
   }
 
   // The stream from the foot of the waterfall into the second pond and on out
@@ -1283,8 +1311,9 @@ const Scenery = (() => {
 
     const log = fallenLog(level.streams[0].bridge.length, 503, false);
     const frames = [];
+    const surface = [];
     for (let f = 0; f < 4; f++) {
-      const frame = pixelCanvas(w, h, (x, y) => {
+      const { frame, surface: sparkles } = waterPicture(w, h, (x, y) => {
         const px = x + left;
         const py = y + top;
         const nearPond = x >= pondBox.left && x <= pondBox.right && y >= pondBox.top && y <= pondBox.bottom;
@@ -1327,8 +1356,9 @@ const Scenery = (() => {
         for (const dy of [-12, -3]) frame.getContext('2d').drawImage(log, Math.round(bridge.x - left - bridge.length / 2), Math.round(bridge.y - top + dy));
       }
       frames.push(frame);
+      surface.push(sparkles);
     }
-    return { x: left, y: top, frames };
+    return { x: left, y: top, frames, surface };
   }
 
   // A cloud's shadow: full strength in the middle, stepping down towards the edge.

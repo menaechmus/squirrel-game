@@ -414,6 +414,185 @@ const Sprites = (() => {
     '..kkk..',
   ]);
 
+  // ---- life on the water (1.15) ----
+
+  // Fish seen from above, through the water: a body and a tail fan, drawn at
+  // any heading. `heading` 0 is right, counting clockwise in eighths of a
+  // turn; `flick` swings the tail to one side (-1) or the other (1). No
+  // outline: the game draws them faint, under the water's sparkles.
+  const FISH_COLORS = {
+    plain: { back: '#3e4c2e', head: '#2f3a22', tail: '#55663e' },
+    gold: { back: '#f07a1c', head: '#ff9a3a', tail: '#ffc06a' },
+  };
+  function fishFromAbove(colors) {
+    const size = 11;
+    const turns = [];
+    for (let heading = 0; heading < 8; heading++) {
+      const angle = (heading * Math.PI) / 4;
+      turns.push([-1, 1].map((flick) => {
+        const c = canvas(size, size);
+        const g = c.getContext('2d');
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            const dx = x + 0.5 - size / 2;
+            const dy = y + 0.5 - size / 2;
+            const along = dx * Math.cos(angle) + dy * Math.sin(angle) - 0.6;   // towards the head
+            const across = -dx * Math.sin(angle) + dy * Math.cos(angle);
+            let color = null;
+            // A body fuller at the shoulders than at the tail.
+            const half = 1.75 * (along > 0 ? 1 : 1 + along / 6);
+            if ((along / 3.3) ** 2 + (across / half) ** 2 < 1) color = along > 1.6 ? colors.head : colors.back;
+            else if (along < -2.4 && along > -4.9) {
+              const back = -along - 2.4;   // how far behind the body
+              if (Math.abs(across - flick * back * 0.45) < 0.45 + back * 0.55) color = colors.tail;
+            }
+            if (color) {
+              g.fillStyle = color;
+              g.fillRect(x, y, 1, 1);
+            }
+          }
+        }
+        return c;
+      }));
+    }
+    return turns;
+  }
+
+  // A fish leaping clear of the water, seen from the side, facing right:
+  // nose up as it rises, level at the top, nose down as it dives. Outlined,
+  // like everything else above the water.
+  const LEAP_COLORS = {
+    plain: { back: '#4f6a3a', side: '#b8c8b0', belly: '#eef2ea', fin: '#6f8a5a' },
+    gold: { back: '#e8701a', side: '#ffa64a', belly: '#ffe0a0', fin: '#ffb860' },
+  };
+  function fishLeaping(colors) {
+    const w = 12;
+    const h = 10;
+    const right = [-0.6, 0, 0.6].map((tilt) => {
+      const shape = [];
+      for (let y = 0; y < h; y++) {
+        shape.push([]);
+        for (let x = 0; x < w; x++) {
+          const dx = x + 0.5 - w / 2;
+          const dy = y + 0.5 - h / 2;
+          const along = dx * Math.cos(tilt) + dy * Math.sin(tilt);
+          const across = -dx * Math.sin(tilt) + dy * Math.cos(tilt);   // down the fish's side
+          let color = null;
+          if ((along / 3.8) ** 2 + (across / 1.6) ** 2 < 1) {
+            color = along > 2.6 && across < -0.2 && across > -1 ? '#1a1a1a'   // its eye
+              : across < -0.55 ? colors.back : across < 0.5 ? colors.side : colors.belly;
+          } else if (along < -3 && along > -5.4 && Math.abs(across) < 0.4 + (-along - 3) * 0.6) {
+            color = colors.fin;
+          }
+          shape[y].push(color);
+        }
+      }
+      const c = canvas(w, h);
+      const g = c.getContext('2d');
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let color = shape[y][x];
+          // A dark outline round the fish.
+          if (!color && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ox, oy]) => shape[y + oy] && shape[y + oy][x + ox])) color = PALETTE.k;
+          if (!color) continue;
+          g.fillStyle = color;
+          g.fillRect(x, y, 1, 1);
+        }
+      }
+      return c;
+    });
+    return { right, left: right.map(mirrored) };
+  }
+
+  // Mallards, facing right: the drake with his green head, white collar,
+  // chestnut breast and grey flanks; the hen, the same bird in mottled
+  // browns. Floating on the water (the bottom row is the waterline), up-ended
+  // to feed with only the tail and feet showing, and flying with the wings up
+  // and then down.
+  const DUCK_FLOATING = [
+    '..........kkk...',
+    '.........khHHk..',
+    '.........kHHeHk.',
+    '.........kHHHkyy',
+    '..........kwwkk.',
+    'kk.......kcccck.',
+    'ktkkkkkkkcccck..',
+    'kddugggggggcck..',
+    '.kdGGGGGGGGGk...',
+    '..kkkkkkkkkk....',
+  ];
+  const DUCK_UP_ENDED = [
+    '..f.f.......',
+    '.kfkfk......',
+    '.kttdk......',
+    '..kddkk.....',
+    '..kdgggk....',
+    '...kgggGk...',
+    '...kggggGk..',
+    '..kGGGGGGGk.',
+    '...kkkkkkk..',
+  ];
+  const DUCK_FLYING = [
+    [
+      '....kkk...........',
+      '....kgggk.........',
+      '.....kgggk........',
+      '......kgGGk...kkk.',
+      'kk.....kgGGk.khHHk',
+      'ktdkkkkkuGgccwHHey',
+      '.kddggggggggcckkyy',
+      '..kkGGGGGGGGkk....',
+      '....kkkkkkkk......',
+      '..................',
+      '..................',
+    ],
+    [
+      '..................',
+      '..................',
+      '..................',
+      '..............kkk.',
+      'kk.....kkkkk.khHHk',
+      'ktdkkkkggggccwHHey',
+      '.kddggugggggckkkyy',
+      '..kkGgggGGGkk.....',
+      '.....kgggGk.......',
+      '......kgggk.......',
+      '.......kkk........',
+    ],
+  ];
+  const MALLARD = {
+    drake: { H: '#2f7a46', h: '#53a868', y: '#e2c23a', w: '#f4f4ee', c: '#6e3a24', g: '#b9b6ae', G: '#8e8b84', d: '#262626', t: '#e8e8e2', u: '#3e62c4', f: '#ea8a2a' },
+    hen: { H: '#8a6a44', h: '#a8865c', y: '#d08a34', w: '#8a6a44', c: '#9a7448', g: '#a7825a', G: '#7c5d3c', d: '#6a4c30', t: '#c8b08a', u: '#3e62c4', f: '#ea8a2a' },
+  };
+  function mallard(colors) {
+    const both = (rows) => {
+      const right = fromText(rows, colors);
+      return { right, left: mirrored(right) };
+    };
+    const flying = DUCK_FLYING.map((rows) => fromText(rows, colors));
+    return {
+      floating: both(DUCK_FLOATING),
+      upEnded: both(DUCK_UP_ENDED),
+      flying: { right: flying, left: flying.map(mirrored) },
+    };
+  }
+
+  // Rings of ripples spreading from a splash, smallest first; the smallest
+  // also marks a duck's wake.
+  function ripple(rx, ry) {
+    const w = rx * 2 + 1;
+    const h = ry * 2 + 1;
+    const c = canvas(w, h);
+    const g = c.getContext('2d');
+    g.fillStyle = '#e8f6ff';
+    for (let step = 0; step < 48; step++) {
+      const angle = (step / 48) * Math.PI * 2;
+      if (step % 8 === 7) continue;   // broken here and there
+      g.fillRect(Math.round(rx + Math.cos(angle) * rx), Math.round(ry + Math.sin(angle) * ry), 1, 1);
+    }
+    return c;
+  }
+
   return {
     IDLE_START,
     IDLE_CYCLE,
@@ -447,5 +626,10 @@ const Sprites = (() => {
     },
     mushroom,
     shadowSmall: shadow(10, 4),
+    // Life on the water (1.15).
+    fish: { plain: fishFromAbove(FISH_COLORS.plain), gold: fishFromAbove(FISH_COLORS.gold) },
+    fishLeaping: { plain: fishLeaping(LEAP_COLORS.plain), gold: fishLeaping(LEAP_COLORS.gold) },
+    mallard: { drake: mallard(MALLARD.drake), hen: mallard(MALLARD.hen) },
+    ripples: [ripple(2, 1), ripple(4, 2), ripple(6, 3)],
   };
 })();
