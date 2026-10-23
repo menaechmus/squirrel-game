@@ -16,10 +16,12 @@ const WaterLife = (() => {
   // Every number that decides how the fish and ducks behave. Times are
   // seconds, distances and speeds game pixels.
   const TUNING = {
+    shallows: 14,             // however big a pond, fish and ducks come within this far of its shore (1.16)
     fish: {
       inPonds: [5, 3],        // fish in each pond...
       goldfish: [1, 1],       // ...of which goldfish
-      deep: 0.68,             // pond fish keep within this share of the pond's size, clear of the shore
+      deep: 0.68,             // pond fish keep within this share of the pond's size, clear of the shore...
+      belowHedge: 8,          // ...and this far below the top hedge, where the first pond runs out through it (1.16)
       speed: [5, 12],         // cruising
       rest: [0.6, 2.6],       // still between swims
       turn: 3.5,              // how fast one turns, in radians a second
@@ -36,6 +38,7 @@ const WaterLife = (() => {
       least: [2, 1],          // ...and never fewer...
       most: [4, 2],           // ...or more
       deep: 0.66,
+      belowHedge: 16,         // so a duck's picture never reaches the hedge
       spacing: [18, 11],      // floating ducks keep this far apart across the screen and up it (a duck is 16 by 10)
       paddle: [3, 7],
       rest: [1.5, 5],         // still between paddles
@@ -57,6 +60,9 @@ const WaterLife = (() => {
   };
   const TAU = Math.PI * 2;
   const MAX_DRIFT = 120;     // ignore the player "moving" faster than this (a restart, not a run)
+  // Where to look for a pond on screen, as shares of its size: its middle, and
+  // enough points towards its ends to catch a tall one through a short, wide screen (1.16).
+  const POND_PROBES = [[0, 0], [0.6, 0], [-0.6, 0], [0, 0.6], [0, -0.6], [0, 0.85], [0, -0.85], [0.6, 0.45], [-0.6, 0.45], [0.6, -0.45], [-0.6, -0.45]];
 
   function create(world) {
     const { level, player } = world;
@@ -66,11 +72,22 @@ const WaterLife = (() => {
     // Is a spot well inside the screen, clear of the top bar? Or well outside it?
     const onScreen = (spot, view) => spot.x > view.x + 12 && spot.x < view.x + view.w - 12 && spot.y > view.y + 26 && spot.y < view.y + view.h - 8;
     const outside = (spot, view) => spot.x < view.x - 24 || spot.x > view.x + view.w + 24 || spot.y < view.y - 24 || spot.y > view.y + view.h + 24;
-    const inPond = (pond, x, y, share) => ((x - pond.x) / (pond.a * share)) ** 2 + ((y - pond.y) / (pond.b * share)) ** 2 < 1;
-    function pondSpot(pond, share) {
-      const angle = random() * TAU;
-      const reach = Math.sqrt(random()) * share;
-      return { x: pond.x + Math.cos(angle) * pond.a * reach, y: pond.y + Math.sin(angle) * pond.b * reach };
+    // A pond's size times `share`, but in a big pond never more than the
+    // shallows in from its shore (1.16).
+    const reachOf = (length, share) => Math.max(length * share, length - TUNING.shallows);
+    // Is a spot inside `share` of a pond's size, and, if `below` is given, that
+    // far below the top hedge? (The first pond runs out through it, 1.16.)
+    const inPond = (pond, x, y, share, below = null) => (below === null || y > level.border + below)
+      && ((x - pond.x) / reachOf(pond.a, share)) ** 2 + ((y - pond.y) / reachOf(pond.b, share)) ** 2 < 1;
+    // Somewhere inside `share` of a pond's size, `below` px below the top hedge.
+    function pondSpot(pond, share, below) {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const angle = random() * TAU;
+        const reach = Math.sqrt(random());
+        const spot = { x: pond.x + Math.cos(angle) * reachOf(pond.a, share) * reach, y: pond.y + Math.sin(angle) * reachOf(pond.b, share) * reach };
+        if (spot.y > level.border + below) return spot;
+      }
+      return { x: pond.x, y: Math.max(pond.y, level.border + below + 1) };
     }
     // Turn `from` towards `to` (radians) by at most `most`.
     function turned(from, to, most) {
@@ -156,10 +173,11 @@ const WaterLife = (() => {
     // ---- fish ----
 
     function pondFish(pond, gold) {
-      const spot = pondSpot(pond, TUNING.fish.deep);
+      const { deep, belowHedge } = TUNING.fish;
+      const spot = pondSpot(pond, deep, belowHedge);
       return {
         pond, reach: null, gold, x: spot.x, y: spot.y, angle: random() * TAU, speed: pick(TUNING.fish.speed),
-        target: pondSpot(pond, TUNING.fish.deep), rest: pick(TUNING.fish.rest), wiggle: random() * 2, leap: null,
+        target: pondSpot(pond, deep, belowHedge), rest: pick(TUNING.fish.rest), wiggle: random() * 2, leap: null,
       };
     }
 
@@ -186,7 +204,7 @@ const WaterLife = (() => {
       const distance = Math.hypot(dx, dy);
       if (distance < 1.5) {
         one.rest = pick(tuning.rest);
-        one.target = pondSpot(one.pond, tuning.deep);
+        one.target = pondSpot(one.pond, tuning.deep, tuning.belowHedge);
         one.speed = pick(tuning.speed);
         return;
       }
@@ -196,11 +214,11 @@ const WaterLife = (() => {
       const step = Math.min(distance, one.speed * dt * Math.max(0.2, facing));
       const x = one.x + Math.cos(one.angle) * step;
       const y = one.y + Math.sin(one.angle) * step;
-      if (inPond(one.pond, x, y, tuning.deep + 0.04)) {
+      if (inPond(one.pond, x, y, tuning.deep + 0.04, tuning.belowHedge)) {
         one.x = x;
         one.y = y;
       } else {
-        one.target = pondSpot(one.pond, tuning.deep);   // the shallows: turn back
+        one.target = pondSpot(one.pond, tuning.deep, tuning.belowHedge);   // the shallows, or the hedge: turn back
       }
       one.wiggle += dt * (2 + one.speed * 0.5);
     }
@@ -230,7 +248,7 @@ const WaterLife = (() => {
 
     // Is a spot water a fish may swim in?
     function fishWater(one, spot) {
-      if (one.pond) return inPond(one.pond, spot.x, spot.y, TUNING.fish.deep + 0.04);
+      if (one.pond) return inPond(one.pond, spot.x, spot.y, TUNING.fish.deep + 0.04, TUNING.fish.belowHedge);
       return true;   // a stream fish comes down on its own reach (see startLeap)
     }
 
@@ -311,7 +329,7 @@ const WaterLife = (() => {
     function openWater(index, share, also = () => true, self = null) {
       const pond = level.ponds[index];
       for (let attempt = 0; attempt < 16; attempt++) {
-        const spot = pondSpot(pond, share);
+        const spot = pondSpot(pond, share, TUNING.ducks.belowHedge);
         const crowded = ducks.some((duck) => duck !== self && duck.index === index && duck.state !== 'rise'
           && (crowding(duck, spot) || (duck.target && crowding(duck.target, spot)) || (duck.landAt && crowding(duck.landAt, spot))));
         if (!crowded && also(spot)) return spot;
@@ -319,7 +337,7 @@ const WaterLife = (() => {
       return null;
     }
 
-    function floatAbout(duck, dt) {
+    function floatAbout(duck, dt, view) {
       const tuning = TUNING.ducks;
       const pond = level.ponds[duck.index];
       duck.bob += dt * 2.2;
@@ -329,7 +347,7 @@ const WaterLife = (() => {
         const dy = duck.y - player.y;
         const length = Math.hypot(dx, dy) || 1;
         let to = { x: duck.x + (dx / length) * 18, y: duck.y + (dy / length) * 18 };
-        if (!inPond(pond, to.x, to.y, tuning.deep)) to = { x: duck.x + (pond.x - duck.x) * 0.45, y: duck.y + (pond.y - duck.y) * 0.45 };
+        if (!inPond(pond, to.x, to.y, tuning.deep, tuning.belowHedge)) to = { x: duck.x + (pond.x - duck.x) * 0.45, y: Math.max(duck.y + (pond.y - duck.y) * 0.45, level.border + tuning.belowHedge + 1) };
         duck.target = to;
         duck.speed = tuning.away;
         duck.shy = true;   // until it gets there
@@ -366,7 +384,14 @@ const WaterLife = (() => {
       if (duck.nextDip <= 0) {
         duck.dip = pick(tuning.dip);   // up-ends to feed
       } else if (duck.rest <= 0) {
-        const spot = openWater(duck.index, tuning.deep, (each) => near(each, duck, 40) && !near(each, duck, 8), duck);
+        // A duck just out of sight paddles back into view: a big pond is not all
+        // on screen at once (1.16), and ducks fly off from where they are seen,
+        // so otherwise they would gather where they are not.
+        const middle = { x: view.x + view.w / 2, y: view.y + view.h / 2 };
+        const handy = { x: view.x - 120, y: view.y - 120, w: view.w + 240, h: view.h + 240 };
+        const drifting = !onScreen(duck, view) && !outside(duck, handy);
+        const nearer = (spot) => Math.hypot(spot.x - middle.x, spot.y - middle.y) < Math.hypot(duck.x - middle.x, duck.y - middle.y) - 6;
+        const spot = openWater(duck.index, tuning.deep, (each) => near(each, duck, 40) && !near(each, duck, 8) && (!drifting || nearer(each)), duck);
         if (spot) {
           duck.target = spot;
           duck.speed = pick(tuning.paddle);
@@ -382,7 +407,7 @@ const WaterLife = (() => {
       const pond = level.ponds[duck.index];
       let way = duck.facing === 'right' ? 1 : -1;
       // Room to run on the water that way? If not, the other way.
-      if (!inPond(pond, duck.x + way * tuning.runSpeed * tuning.run * 0.6, duck.y, 0.9)) way = -way;
+      if (!inPond(pond, duck.x + way * tuning.runSpeed * tuning.run * 0.6, duck.y, 0.9, tuning.belowHedge)) way = -way;
       duck.facing = way > 0 ? 'right' : 'left';
       duck.state = 'run';
       duck.timer = tuning.run;
@@ -407,7 +432,7 @@ const WaterLife = (() => {
       const way = fromLeft ? 1 : -1;
       // It touches down short of its spot and slides the rest of the way.
       const touch = { x: spot.x - way * tuning.skid, y: spot.y };
-      if (!inPond(level.ponds[index], touch.x, touch.y, tuning.deep)) return false;
+      if (!inPond(level.ponds[index], touch.x, touch.y, tuning.deep, tuning.belowHedge)) return false;
       const duck = makeDuck(index, spot, random() < 0.5);
       Object.assign(duck, {
         state: 'arrive', landAt: spot, touch, way, facing: fromLeft ? 'right' : 'left',
@@ -423,7 +448,7 @@ const WaterLife = (() => {
       for (const duck of ducks) {
         duck.flap += dt;
         if (duck.state === 'float') {
-          floatAbout(duck, dt);
+          floatAbout(duck, dt, view);
         } else if (duck.state === 'run') {
           // Pattering along the surface, wings going, throwing up spray.
           duck.timer -= dt;
@@ -489,7 +514,7 @@ const WaterLife = (() => {
       // Comings and goings: only while the pond is in view, the first soon after it comes into view.
       for (const water of waters) {
         const pond = level.ponds[water.index];
-        const visible = [[0, 0], [0.6, 0], [-0.6, 0], [0, 0.6], [0, -0.6]].some(([fx, fy]) => onScreen({ x: pond.x + fx * pond.a, y: pond.y + fy * pond.b }, view));
+        const visible = POND_PROBES.some(([fx, fy]) => onScreen({ x: pond.x + fx * pond.a, y: pond.y + fy * pond.b }, view));
         if (!visible) {
           water.seen = false;
           continue;

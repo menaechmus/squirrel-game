@@ -1160,20 +1160,26 @@ const Scenery = (() => {
   }
 
   // A pond's water: the colour at park pixel (px, py) in frame `f`, or null
-  // beyond its shore. Glints drift across and the shoreline shimmers.
-  function pondWater(pond, rand) {
+  // beyond its shore. Glints drift across and the shoreline shimmers. Where it
+  // runs out through the top hedge (1.16) it lies in the hedge's shade, as the
+  // stream does where it leaves the park, with the hedge cut beside it.
+  function pondWater(pond, rand, border) {
+    // As many glints for its size as it had before it grew.
+    const glints = Math.round(46 * (pond.before ? (pond.a * pond.b) / (pond.before.a * pond.before.b) : 1));
+    const shade = border + 3;   // the hedge, and the strip of shade it casts into the park
     const lit = [new Set(), new Set(), new Set(), new Set()];
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < glints; i++) {
       const angle = rand() * TAU;
       const reach = Math.sqrt(rand()) * 0.8;
       const x = Math.round(pond.x + Math.cos(angle) * pond.a * reach);
       const y = Math.round(pond.y + Math.sin(angle) * pond.b * reach);
       const length = 2 + Math.floor(rand() * 3);
       const phase = Math.floor(rand() * 4);
+      if (y < shade) continue;
       for (let f = 0; f < 4; f++) {
         const step = (f + phase) % 4;
         if (step === 3) continue;   // each glint winks out for one frame, then starts again
-        for (let i2 = 0; i2 < length; i2++) lit[f].add((x + step * 2 + i2) + ',' + y);
+        for (let i2 = 0; i2 < length; i2++) lit[f].add((x + step * 2 + i2) + y * 4096);   // a number for each park pixel
       }
     }
     return (px, py, f) => {
@@ -1182,9 +1188,15 @@ const Scenery = (() => {
       const angle = Math.atan2(dy, dx);
       const n = ((dx / pond.a) ** 2 + (dy / pond.b) ** 2) * (1 + 0.05 * Math.sin(angle * 6));
       if (n >= 1.1) return null;
+      if (py < shade) {
+        // In the hedge's shade: darker, without glints or shimmer; in the hedge itself its cut edge beside the water.
+        if (n < 1) return n < 0.75 ? '#2f6aa8' : '#3a7ec6';
+        if (py >= border) return '#3a7a32';
+        return n < 1.03 ? OUTLINE.leaf : null;
+      }
       if (n >= 1) return '#3a7a32';   // damp grass at the water's edge
       if (n >= 0.9) return (Math.floor((angle + Math.PI) * 9) + f) % 4 === 0 ? '#d4eeff' : '#86c2f2';
-      if (lit[f].has(px + ',' + py)) return '#b6dcff';
+      if (lit[f].has(px + py * 4096)) return '#b6dcff';
       const checker = (px + py) % 2 === 0;
       if (n < 0.45 || (n < 0.52 && checker)) return '#3a7ec6';
       if (n < 0.75 || (n < 0.8 && checker)) return '#4a90d9';
@@ -1215,15 +1227,16 @@ const Scenery = (() => {
     return { frame, surface };
   }
 
-  // The pond as four frames, and its sparkles for each.
+  // The pond as four frames, and its sparkles for each. (Since 1.16 it runs
+  // out of the park at the top, so the picture starts at the park's edge.)
   function buildPond(level) {
     const pond = level.pond;
-    const water = pondWater(pond, seededRandom(55));
+    const water = pondWater(pond, seededRandom(55), level.border);
     const pad = 8;
     const left = Math.floor(pond.x - pond.a - pad);
-    const top = Math.floor(pond.y - pond.b - pad);
+    const top = Math.max(0, Math.floor(pond.y - pond.b - pad));
     const w = Math.ceil(pond.a * 2 + pad * 2);
-    const h = Math.ceil(pond.b * 2 + pad * 2);
+    const h = Math.ceil(pond.y + pond.b + pad) - top;
     const frames = [];
     const surface = [];
     for (let f = 0; f < 4; f++) {
@@ -1235,15 +1248,15 @@ const Scenery = (() => {
   }
 
   // The stream from the foot of the waterfall into the second pond and on out
-  // of the park, and that pond, as one picture in four frames, with a log
-  // bridge laid across each stretch. The water is deeper in the middle; its
-  // banks are damp earth and pebbles; glints drift downstream, ripples break
-  // round a few stones, and the pool under the waterfall churns. Where the
-  // stream leaves the park it runs through a gap in the hedge.
+  // of the park, and that pond, as one picture in four frames, and the log
+  // bridge laid across each stretch as another (1.16). The water is deeper in
+  // the middle; its banks are damp earth and pebbles; glints drift downstream,
+  // ripples break round a few stones, and the pool under the waterfall churns.
+  // Where the stream leaves the park it runs through a gap in the hedge.
   const STREAM_STONES = [[0, 38, 0.35], [0, 112, -0.4], [0, 164, 0.3], [1, 64, -0.35], [1, 94, 0.3]];   // stretch, how far down, how far across
   function buildBrook(level) {
     const pond = level.ponds[1];
-    const water = pondWater(pond, seededRandom(56));
+    const water = pondWater(pond, seededRandom(56), level.border);
     const rand = seededRandom(57);
     const inner = level.size - level.border;
     // Every point of both stretches, each knowing its stretch and which way is across it.
@@ -1309,7 +1322,13 @@ const Scenery = (() => {
       return down > 1 && down < 5 && Math.abs(side) < 2.6 - down * 0.3 && hash(x, y, 80 + f) > 0.45;
     });
 
+    // Two logs side by side make each bridge: a picture of their own, laid
+    // over everything on the water (its sparkles, fish, rings and wakes).
     const log = fallenLog(level.streams[0].bridge.length, 503, false);
+    const bridges = canvas(w, h);
+    for (const { bridge } of level.streams) {
+      for (const dy of [-12, -3]) bridges.getContext('2d').drawImage(log, Math.round(bridge.x - left - bridge.length / 2), Math.round(bridge.y - top + dy));
+    }
     const frames = [];
     const surface = [];
     for (let f = 0; f < 4; f++) {
@@ -1351,14 +1370,10 @@ const Scenery = (() => {
         if (depth < 0.78 || (depth < 0.86 && checker)) return '#4a90d9';
         return '#62a6e6';
       });
-      // Two logs side by side make each bridge.
-      for (const { bridge } of level.streams) {
-        for (const dy of [-12, -3]) frame.getContext('2d').drawImage(log, Math.round(bridge.x - left - bridge.length / 2), Math.round(bridge.y - top + dy));
-      }
       frames.push(frame);
       surface.push(sparkles);
     }
-    return { x: left, y: top, frames, surface };
+    return { x: left, y: top, frames, surface, bridges };
   }
 
   // A cloud's shadow: full strength in the middle, stepping down towards the edge.

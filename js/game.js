@@ -797,6 +797,8 @@
       ctx.drawImage(ring.sprite, ring.x - camX, ring.y - camY);
     }
     ctx.globalAlpha = 1;
+    // The log bridges, over everything on the water (1.16).
+    ctx.drawImage(brook.bridges, brook.x - camX, brook.y - camY);
     for (const decal of rivals.decals()) ctx.drawImage(decal.sprite, decal.x - camX, decal.y - camY);
     const lit = Scenery.flicker(clock);
     const cabinLeft = cabin.x - (cabinArt.frames[0].width >> 1) - camX;
