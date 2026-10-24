@@ -2,11 +2,14 @@
 // land and the groundhogs that pop up (rivals.js). Fish swim under the surface
 // of both ponds and in the stream, and now and then one leaps clear; mallards
 // float on the ponds, paddling, bobbing and up-ending to feed, and now and
-// then one flies off or another flies in. Nothing here touches an acorn, and
-// it has random numbers of its own (the game seeds it from a stream that is
-// not the thieves'), so the thieves behave exactly the same. What is meant to
-// be seen (a leap, a take-off, a landing) only happens where the player can
-// see it.
+// then one flies off or another flies in. Since 1.17, frogs sit on the lily
+// pads and the banks and plop into the water when a squirrel comes right up
+// to them, and dragonflies dart and hover over the ponds. Nothing here
+// touches an acorn, and it has random numbers of its own (the game seeds it
+// from a stream that is not the thieves'), so the thieves behave exactly the
+// same; the frogs and dragonflies have a stream of their own again, so the
+// fish and ducks do too. What is meant to be seen (a leap, a take-off, a
+// landing) only happens where the player can see it.
 //
 // The game hands in a `world`:
 //   level, player, view() -> the part of the park on screen, as { x, y, w, h },
@@ -56,6 +59,25 @@ const WaterLife = (() => {
       skid: 9,                // it slides this far on landing
       skidTime: 0.45,
       lead: 2.5,              // a landing is placed where the player will still see it this long from now (flying in takes about that)
+    },
+    frogs: {                  // (1.17)
+      inPonds: [3, 2],        // on each pond, sitting on lily pads or on the bank
+      onBank: 0.4,            // how often one climbs out onto the bank rather than a pad
+      near: 22,               // a squirrel this close sends one plopping into the water
+      leap: 0.36,             // seconds in the air
+      height: 5,              // at the top of the arc
+      out: 9,                 // how far out into the water it plops
+      under: [6, 15],         // seconds under the water before it climbs out again...
+      clearOfPlayer: 50,      // ...somewhere at least this far from the squirrel
+      turn: [4, 12],          // seconds between turning round where it sits
+    },
+    darters: {                // dragonflies (1.17)
+      perPond: [2, 1],
+      hover: [0.4, 1.6],      // seconds hovering between darts
+      dart: [14, 40],         // how far a dart takes it
+      speed: 95,
+      height: [7, 15],
+      shy: 20,                // it darts off if a squirrel comes this close
     },
   };
   const TAU = Math.PI * 2;
@@ -145,9 +167,43 @@ const WaterLife = (() => {
       { stretch: 1, from: below(1), to: clearOf(1, below(1), lastS(1)), across: 0.3 },
     ].filter((reach) => reach.to - reach.from > 6);
 
+    // Where a frog can sit (1.17): the lily pads near each pond's shore (so a
+    // squirrel at the water's edge can come right up to one there), and spots
+    // on the bank just beyond where the water is drawn to end, clear of the
+    // paths, the hedge, the reeds, anything solid, the acorns and the tree tops.
+    const shoreGap = (pond, spot) => {
+      const share = Math.hypot((spot.x - pond.x) / pond.a, (spot.y - pond.y) / pond.b) || 0.01;
+      return Math.hypot(spot.x - pond.x, spot.y - pond.y) * (1 / share - 1);
+    };
+    const canopies = level.props.filter((prop) => Scenery.props[prop.sprite].hides).map((prop) => {
+      const sprite = Scenery.props[prop.sprite].frames[0];
+      return { x: prop.x, y: prop.y, half: sprite.width / 2, height: sprite.height };
+    });
+    const underATop = (x, y) => canopies.some((tree) => tree.y > y && y > tree.y - tree.height - 4 && Math.abs(x - tree.x) < tree.half + 6);
+    const seats = level.ponds.map((pond, index) => {
+      const list = (level.pads || []).filter((pad) => pad.pond === index && shoreGap(pond, pad) <= 16)
+        .map((pad) => ({ x: pad.x, y: pad.y, pad: true }));
+      const steps = Math.round((Math.PI * (pond.a + pond.b)) / 9);
+      for (let i = 0; i < steps; i++) {
+        const t = (i / steps) * TAU;
+        const edge = 1 / Math.sqrt(1 + 0.05 * Math.sin(6 * Math.atan2(pond.b * Math.sin(t), pond.a * Math.cos(t))));
+        const x = Math.round(pond.x + Math.cos(t) * (pond.a * edge + 2.5));
+        const y = Math.round(pond.y + Math.sin(t) * (pond.b * edge + 2.5));
+        if (y < level.border + 20 || level.onPath(x, y, 6) || !level.standsClear(x, y, 8) || underATop(x, y)
+          || level.acorns.some((acorn) => near(acorn, { x, y }, 16)) || (level.reeds || []).some((reed) => near(reed, { x, y }, 9))
+          || level.streams.some(({ points }) => points.some((point) => near(point, { x, y }, point.half + 8)))
+          || list.some((seat) => near(seat, { x, y }, 14))) continue;
+        list.push({ x, y, pad: false });
+      }
+      return list;
+    });
+
     let active = false;
     let fish = [];
     let ducks = [];
+    let frogs = [];
+    let darters = [];
+    let critters = Math.random;   // the frogs' and dragonflies' own random numbers
     let rings = [];           // splash rings and wakes, on the water
     let waters = [];          // each pond's comings and goings: { index, timer, seen }
     let leapTimer = 0;
@@ -539,6 +595,123 @@ const WaterLife = (() => {
       }
     }
 
+    // ---- frogs and dragonflies (1.17) ----
+
+    const pickOf = ([min, max]) => min + critters() * (max - min);
+    // A seat on pond `index` for a frog: no other frog's, away from the squirrel.
+    function freeSeat(index, onBank) {
+      const open = seats[index].filter((seat) => seat.pad !== onBank && !frogs.some((frog) => frog.seat === seat)
+        && !near(seat, player, TUNING.frogs.clearOfPlayer));
+      if (!open.length) return onBank === null ? null : freeSeat(index, null);
+      return open[Math.floor(critters() * open.length)];
+    }
+
+    function sitDown(frog, seat) {
+      Object.assign(frog, { seat, x: seat.x, y: seat.y, state: 'sit', timer: pickOf(TUNING.frogs.turn), facing: critters() < 0.5 ? 'left' : 'right' });
+    }
+
+    // Plop: into the water a little way out from where it sat, away from the squirrel.
+    function plop(frog) {
+      const pond = level.ponds[frog.index];
+      let dx = frog.x - player.x;
+      let dy = frog.y - player.y;
+      // From the bank, out towards the middle of the pond.
+      if (!frog.seat.pad) [dx, dy] = [pond.x - frog.x, pond.y - frog.y];
+      const length = Math.hypot(dx, dy) || 1;
+      let to = { x: frog.x + (dx / length) * TUNING.frogs.out, y: frog.y + (dy / length) * TUNING.frogs.out };
+      if (!inPond(pond, to.x, to.y, 0.92)) to = { x: frog.x + (pond.x - frog.x) * 0.2, y: frog.y + (pond.y - frog.y) * 0.2 };
+      frog.state = 'leap';
+      frog.leap = { t: 0, from: { x: frog.x, y: frog.y }, to };
+      frog.facing = to.x >= frog.x ? 'right' : 'left';
+      say('frog', frog);
+    }
+
+    function updateFrogs(dt) {
+      const tuning = TUNING.frogs;
+      let leaping = frogs.some((frog) => frog.state === 'leap');
+      for (const frog of frogs) {
+        if (frog.state === 'sit') {
+          // Calm: only one goes in at a time, the others a moment later.
+          if (!leaping && near(frog, player, tuning.near)) {
+            plop(frog);
+            leaping = true;
+            continue;
+          }
+          frog.timer -= dt;
+          if (frog.timer <= 0) {
+            frog.facing = frog.facing === 'left' ? 'right' : 'left';
+            frog.timer = pickOf(tuning.turn);
+          }
+        } else if (frog.state === 'leap') {
+          frog.leap.t += dt;
+          const share = Math.min(1, frog.leap.t / tuning.leap);
+          frog.x = frog.leap.from.x + (frog.leap.to.x - frog.leap.from.x) * share;
+          frog.y = frog.leap.from.y + (frog.leap.to.y - frog.leap.from.y) * share;
+          if (share >= 1) {
+            ring(frog, true);
+            frog.state = 'under';
+            frog.seat = null;
+            frog.timer = pickOf(tuning.under);
+          }
+        } else if (frog.state === 'under') {
+          frog.timer -= dt;
+          if (frog.timer > 0) continue;
+          const seat = freeSeat(frog.index, critters() < tuning.onBank);
+          if (!seat) {
+            frog.timer = 2;   // nowhere free and out of the squirrel's way just now
+            continue;
+          }
+          sitDown(frog, seat);
+          // It comes up beside its seat with a little ring, and climbs on.
+          ring(seat.pad ? seat : { x: seat.x + (level.ponds[frog.index].x - seat.x) * 0.08, y: seat.y + (level.ponds[frog.index].y - seat.y) * 0.08 }, false);
+        }
+      }
+    }
+
+    // A dragonfly darts to somewhere new over its pond, `away` from a spot if given.
+    function dart(fly, away = null) {
+      const tuning = TUNING.darters;
+      const pond = level.ponds[fly.index];
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const angle = away ? Math.atan2(fly.y - away.y, fly.x - away.x) + (critters() - 0.5) * 1.6 : critters() * TAU;
+        const reach = pickOf(tuning.dart);
+        const to = { x: fly.x + Math.cos(angle) * reach, y: fly.y + Math.sin(angle) * reach };
+        if (inPond(pond, to.x, to.y, 1.02, 20)) {
+          Object.assign(fly, { state: 'dart', toX: to.x, toY: to.y, toZ: pickOf(tuning.height) });
+          return;
+        }
+      }
+      fly.timer = pickOf(tuning.hover);   // nowhere to go just now: hover a little longer
+    }
+
+    function updateDarters(dt) {
+      const tuning = TUNING.darters;
+      for (const fly of darters) {
+        fly.flap += dt;
+        if (fly.state === 'dart') {
+          const dx = fly.toX - fly.x;
+          const dy = fly.toY - fly.y;
+          const distance = Math.hypot(dx, dy);
+          const step = tuning.speed * dt;
+          fly.z += (fly.toZ - fly.z) * Math.min(1, dt * 6);
+          if (Math.abs(dx) > 0.5) fly.facing = dx > 0 ? 'right' : 'left';
+          if (distance <= step) {
+            Object.assign(fly, { x: fly.toX, y: fly.toY, state: 'hover', timer: pickOf(tuning.hover) });
+          } else {
+            fly.x += (dx / distance) * step;
+            fly.y += (dy / distance) * step;
+          }
+          continue;
+        }
+        if (near(fly, player, tuning.shy)) {
+          dart(fly, player);
+          continue;
+        }
+        fly.timer -= dt;
+        if (fly.timer <= 0) dart(fly);
+      }
+    }
+
     // ---- each update ----
 
     function reset(seed) {
@@ -564,6 +737,27 @@ const WaterLife = (() => {
           if (spot) ducks.push(makeDuck(index, spot, i % 2 === 0));
         }
       });
+      // The frogs and dragonflies, from random numbers of their own.
+      critters = seededRandom((seed ^ 0x2f6b9e3) >>> 0);
+      frogs = [];
+      darters = [];
+      level.ponds.forEach((pond, index) => {
+        for (let i = 0; i < TUNING.frogs.inPonds[index]; i++) {
+          const seat = freeSeat(index, critters() < TUNING.frogs.onBank);
+          if (!seat) continue;
+          const frog = { index, seat: null, x: 0, y: 0, state: 'sit', timer: 0, facing: 'left', leap: null };
+          sitDown(frog, seat);
+          frogs.push(frog);
+        }
+        for (let i = 0; i < TUNING.darters.perPond[index]; i++) {
+          const angle = critters() * TAU;
+          const reach = Math.sqrt(critters()) * 0.8;
+          const x = pond.x + Math.cos(angle) * pond.a * reach;
+          const y = Math.max(pond.y + Math.sin(angle) * pond.b * reach, level.border + 30);
+          const z = pickOf(TUNING.darters.height);
+          darters.push({ index, x, y, z, toX: x, toY: y, toZ: z, state: 'hover', timer: pickOf(TUNING.darters.hover), facing: 'right', flap: critters() });
+        }
+      });
     }
 
     function update(dt) {
@@ -579,6 +773,8 @@ const WaterLife = (() => {
       const view = world.view();
       updateFish(dt, view);
       updateDucks(dt, view);
+      updateFrogs(dt);
+      updateDarters(dt);
       for (const each of rings) each.age += dt;
       rings = rings.filter((each) => each.age < each.life);
     }
@@ -634,16 +830,32 @@ const WaterLife = (() => {
         const sprite = Sprites.fishLeaping[one.gold ? 'gold' : 'plain'][one.leap.facing][share < 0.35 ? 0 : share < 0.65 ? 1 : 2];
         list.push({ sprite, x: Math.round(one.x) - (sprite.width >> 1), y: Math.round(one.y - z) - (sprite.height >> 1), depth: one.y });
       }
+      // Frogs sitting on a pad or the bank, and one in mid-plop (1.17).
+      for (const frog of frogs) {
+        if (frog.state === 'under') continue;
+        if (frog.state === 'leap') {
+          const share = Math.min(1, frog.leap.t / TUNING.frogs.leap);
+          const sprite = Sprites.frog.leaping[frog.facing];
+          const z = 4 * TUNING.frogs.height * share * (1 - share);
+          list.push({ sprite, x: Math.round(frog.x) - (sprite.width >> 1), y: Math.round(frog.y - z) - sprite.height + 1, depth: frog.y });
+        } else {
+          const sprite = Sprites.frog.sitting[frog.facing];
+          list.push({ sprite, x: Math.round(frog.x) - (sprite.width >> 1), y: Math.round(frog.y) - sprite.height + 1, depth: frog.y });
+        }
+      }
       return list;
     }
 
-    // In the air, drawn over everything: ducks flying off or coming in.
+    // In the air, drawn over everything: ducks flying off or coming in, and dragonflies.
     function flyers() {
       if (!active) return [];
       return ducks.filter((duck) => duck.state === 'rise' || duck.state === 'arrive').map((duck) => {
         const sprite = Sprites.mallard[duck.drake ? 'drake' : 'hen'].flying[duck.facing][Math.floor(duck.flap * 7) % 2];
         return { sprite, x: Math.round(duck.x) - (sprite.width >> 1), y: Math.round(duck.y - duck.z) - 6 };
-      });
+      }).concat(darters.map((fly) => {
+        const sprite = Sprites.dragonfly[fly.facing][Math.floor(fly.flap * 18) % 2];
+        return { sprite, x: Math.round(fly.x) - (sprite.width >> 1), y: Math.round(fly.y - fly.z) - (sprite.height >> 1) };
+      }));
     }
 
     // Ducks in the air cast a shadow below them.
@@ -663,13 +875,15 @@ const WaterLife = (() => {
         list.push({ who: duck, kind, x: duck.x, y: duck.y });
       }
       for (const each of rings) if (each.loud) list.push({ who: each, kind: 'splash', x: each.x, y: each.y });
+      for (const frog of frogs) if (frog.state === 'sit') list.push({ who: frog, kind: 'frog', x: frog.x, y: frog.y });
       return list;
     }
 
     return {
       reset, update, beneath, ripples, things, flyers, shadows, voices,
-      // For tests: the fish, the ducks, the rings, each pond's comings and goings, and what has happened.
-      inspect: () => ({ fish, ducks, rings, waters, log, reaches, leapTimer }),
+      // For tests: the fish, the ducks, the frogs and dragonflies and where a
+      // frog may sit, the rings, each pond's comings and goings, and what has happened.
+      inspect: () => ({ fish, ducks, frogs, darters, seats, rings, waters, log, reaches, leapTimer }),
     };
   }
 

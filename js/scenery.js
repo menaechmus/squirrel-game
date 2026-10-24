@@ -961,6 +961,396 @@ const Scenery = (() => {
     };
   }
 
+  // ---- the pond edges, the leaves, the windmill and the park's furniture (1.17) ----
+
+  // A clump of reeds at the water's edge: thin blades, darker low down, their
+  // tips bending over as the wind leans on them; cattails carry a brown head
+  // on each taller stalk, with a pale spike above it. Three frames, like the
+  // grass: still, leaning, bent over.
+  function reedClump(seed, cattails) {
+    const rand = seededRandom(seed);
+    const w = 13;
+    const h = cattails ? 21 : 15;
+    const blades = [];
+    for (let i = 0; i < (cattails ? 5 : 8); i++) {
+      blades.push({ base: 1.5 + rand() * 9.5, height: (cattails ? 8 : 7) + Math.floor(rand() * (cattails ? 6 : 7)), bend: (rand() - 0.5) * 3, dark: rand() < 0.4 });
+    }
+    const stalks = cattails ? [{ base: 4, height: 18 }, { base: 7, height: 20 }, { base: 9.5, height: 16 }] : [];
+    return [0, 1, 2].map((lean) => {
+      const c = canvas(w, h);
+      const g = c.getContext('2d');
+      const dot = (x, y, color) => {
+        g.fillStyle = color;
+        g.fillRect(Math.round(x), y, 1, 1);
+      };
+      // Olive and yellowing, so they stand out from the lawn behind them.
+      for (const blade of blades) {
+        for (let k = 0; k < blade.height; k++) {
+          const up = k / (blade.height - 1);
+          const tip = k >= blade.height - 2;
+          dot(blade.base + blade.bend * up * up + lean * up ** 1.6 * 1.3, h - 1 - k,
+            k < 2 ? '#3a5a22' : tip ? (blade.dark ? '#b8c45a' : '#dcd884') : blade.dark ? '#6a8a2c' : '#8aa83a');
+        }
+      }
+      for (const stalk of stalks) {
+        for (let k = 0; k < stalk.height; k++) {
+          const x = stalk.base + lean * (k / (stalk.height - 1)) ** 1.6 * 1.1;
+          const y = h - 1 - k;
+          if (k >= stalk.height - 7 && k < stalk.height - 2) {
+            dot(x, y, k === stalk.height - 7 || k === stalk.height - 3 ? '#5a3420' : '#8a5a32');   // the head
+            dot(x + 1, y, '#4a2a18');
+          } else {
+            dot(x, y, k >= stalk.height - 2 ? '#c8b46e' : k < 3 ? '#3a5a22' : '#6a8a2c');
+          }
+        }
+      }
+      return c;
+    });
+  }
+
+  // Fallen leaves, in the colours of the trees they came from. A pile of them
+  // is the first four (the maples' and the oaks'); the acorn's own colours
+  // are left out, so an acorn never hides among them.
+  const AUTUMN = ['#e8602a', '#c8442a', '#f0a030', '#e6c84a', '#a8682e', '#8a4a24', '#d8b040'];
+  const LITTER = {
+    oak: ['#a8682e', '#8a4a24', '#d8b040', '#7a8a34'],
+    elm: ['#e6c84a', '#d8b040', '#b8962e', '#9a7a2a'],
+    maple: ['#e8602a', '#c8442a', '#f0a030', '#f07a2a'],
+    apple: ['#c8b03a', '#a8a03a', '#8a7a2a', '#d8c84a'],
+    birch: ['#e8d24a', '#f0e070', '#d8c03a'],
+  };
+
+  // A pile of fallen leaves: a low mound of them, then lower and lower as it is
+  // scattered flat, which is the last of its four pictures. The game shows
+  // whichever fits how long ago a squirrel ran through it.
+  function leafPile(seed) {
+    const w = 18;
+    const h = 9;
+    return [1, 0.62, 0.3, 0].map((height) => {
+      const c = canvas(w, h);
+      const g = c.getContext('2d');
+      const top = (x) => h - 1 - Math.round(height * 6.2 * Math.max(0, 1 - ((x + 0.5 - w / 2) / (w / 2 - 0.5)) ** 2));
+      const leafAt = (x, y) => AUTUMN[Math.floor(hash(Math.floor((x + (y % 2)) / 2), y, seed) * AUTUMN.length)];
+      if (height > 0) {
+        paint(g, w, h, (x, y) => y >= top(x) && y >= h - 1 - Math.round(height * 6.2) && Math.abs(x + 0.5 - w / 2) < w / 2 - 0.5 - (h - 1 - y) * 0.15, (x, y) => {
+          const color = leafAt(x, y);
+          // Deeper in the pile, and on its shady right side, the leaves are darker.
+          if ((y === h - 1 || x > w * 0.72) && hash(x, y, seed + 1) < 0.6) return '#8a4a24';
+          return color;
+        }, OUTLINE.autumn);
+      }
+      // Leaves scattered round it, more of them the flatter it is.
+      for (let i = 0; i < 26; i++) {
+        const angle = hash(i, 1, seed + 2) * TAU;
+        const reach = Math.sqrt(hash(i, 2, seed + 2));
+        const x = Math.round(w / 2 + Math.cos(angle) * reach * (w / 2 - 1));
+        const y = Math.round(h - 2 + Math.sin(angle) * reach * 1.5);
+        if (hash(i, 3, seed + 2) > 0.35 + (1 - height) * 0.6 || y < top(x) - 1 && height > 0) continue;
+        g.fillStyle = AUTUMN[i % AUTUMN.length];
+        g.fillRect(x, y, hash(i, 4, seed + 2) < 0.6 ? 2 : 1, 1);
+      }
+      return c;
+    });
+  }
+
+  // A small tower mill: a round tower of fieldstone, narrowing as it rises,
+  // with a plank door and a little window, under a wooden cap; four sails of
+  // canvas on wooden frames turn on the cap's front. Eight frames a sixteenth
+  // of a turn apart (four sails look the same every quarter turn); the game
+  // turns them with the wind. Measurements are in pixels from the middle of
+  // the foot: X to the right, Y up the picture (so negative).
+  const WINDMILL = { w: 56, h: 66, foot: 12, neck: 9, tower: 34, cap: 9, hub: 37, sail: 25, clothFrom: 6, clothWide: 4.5 };
+  function windmill() {
+    const { w, h } = WINDMILL;
+    const cx = w >> 1;
+    const gy = h - 1;
+    const halfAt = (Y) => WINDMILL.foot - ((WINDMILL.foot - WINDMILL.neck) * -Y) / WINDMILL.tower;
+    const capBase = 1 - WINDMILL.tower;   // the cap sits on the tower's top course
+    const inTower = (X, Y) => Y <= 0 && Y > -WINDMILL.tower && Math.abs(X + 0.5) < halfAt(Y);
+    const inCap = (X, Y) => Y <= capBase && ((X + 0.5) / (WINDMILL.neck + 2.5)) ** 2 + ((Y - capBase + 0.5) / WINDMILL.cap) ** 2 < 1;
+    const inDoor = (X, Y) => Y > -10 && Y <= 0 && Math.abs(X + 0.5) < (Y === -9 ? 1.5 : Y === -8 ? 2.5 : 3);   // arched at the top
+    const inWindow = (X, Y) => Y >= -24 && Y <= -20 && Math.abs(X + 0.5) < 2;
+    // Fieldstone in courses three pixels high round the curve of the wall,
+    // the stones narrowing towards the sides as the wall turns away; lit from the left.
+    const tower = (X, Y, x, y) => {
+      if (Y <= capBase + 2) return tone(PLANKS, Y === capBase + 1 ? 0.75 : 0.45, x, y, false);   // the curb under the cap
+      const half = halfAt(Y);
+      const across = Math.max(-0.99, Math.min(0.99, (X + 0.5) / half));
+      const course = Math.floor(-Y / 3);
+      const row = -Y % 3;
+      const along = Math.asin(across) * half + course * 2.5 + 20;
+      if (row === 0 || Math.floor(along) % 5 === 0) return FIELDSTONE[4];
+      const shade = 0.22 + across * 0.45 + (hash(Math.floor(along / 5), course, 501) - 0.5) * 0.3 + (row === 2 ? -0.08 : 0.04);
+      return tone(FIELDSTONE, shade, x, y, false);
+    };
+    const door = (X, Y, x, y) => {
+      if (X === 1 && Y === -5) return '#d9b45a';   // the latch
+      const plank = Math.floor((X + 3) / 2);
+      return tone(PLANKS, 0.42 + (hash(plank, 0, 502) - 0.5) * 0.2 + (X + 3) * 0.04, x, y, false);
+    };
+    const pane = (X, Y) => (Y === -20 ? PLANKS[1] : X === -1 && Y === -22 ? '#8a9ab0' : '#2a2e3a');
+    // The cap: weathered boards, lit from the top left, with a knob on top.
+    const cap = (X, Y, x, y) => {
+      const shade = 0.3 + ((X + 0.5) / (WINDMILL.neck + 2.5)) * 0.35 - ((capBase - Y) / WINDMILL.cap) * 0.2 + ((capBase - Y) % 2 === 0 ? 0.1 : 0);
+      return tone(SHAKES, shade, x, y, false);
+    };
+    const frames = [];
+    for (let f = 0; f < 8; f++) {
+      const turn = (f / 8) * (Math.PI / 2);
+      const ways = [0, 1, 2, 3].map((k) => [Math.cos(turn + (k * Math.PI) / 2), Math.sin(turn + (k * Math.PI) / 2)]);
+      // Which part of a sail is here, if any: the stock (the spar from the hub),
+      // the frame round the canvas, a bar across it, or the canvas itself,
+      // which trails behind the stock as the sails turn.
+      const sailAt = (X, Y) => {
+        const dx = X;
+        const dy = Y + WINDMILL.hub;
+        if (dx * dx + dy * dy <= 2.3) return 'hub';
+        for (const [cos, sin] of ways) {
+          const along = dx * cos - dy * sin;
+          const across = dx * sin + dy * cos;
+          if (along < -0.5 || along > WINDMILL.sail + 0.5) continue;
+          if (Math.abs(across) <= 0.65) return 'stock';
+          if (along >= WINDMILL.clothFrom && across > 0.65 && across < 0.65 + WINDMILL.clothWide) {
+            if (across > WINDMILL.clothWide - 0.45 || along > WINDMILL.sail - 0.6 || along < WINDMILL.clothFrom + 0.6) return 'frame';
+            return (along - WINDMILL.clothFrom) % 4 < 0.9 ? 'bar' : 'cloth';
+          }
+        }
+        return null;
+      };
+      // Each pixel's part, worked out once: 5 a sail, 3 the cap, 2 the door or
+      // window, 1 the tower, 0 nothing; and which part of a sail.
+      const parts = new Uint8Array(w * h);
+      const sails = new Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const X = x - cx;
+          const Y = y - gy;
+          const sail = sailAt(X, Y);
+          sails[x + y * w] = sail;
+          if (sail) parts[x + y * w] = 5;
+          else if ((Y === -WINDMILL.cap - WINDMILL.tower + 1 && Math.abs(X + 0.5) < 1) || inCap(X, Y)) parts[x + y * w] = 3;   // the cap, and the knob on top
+          else if (inTower(X, Y)) parts[x + y * w] = inDoor(X, Y) || inWindow(X, Y) ? 2 : 1;
+        }
+      }
+      const partAt = (X, Y) => {
+        const x = X + cx;
+        const y = Y + gy;
+        return x < 0 || y < 0 || x >= w || y >= h ? 0 : parts[x + y * w];
+      };
+      frames.push(pixelCanvas(w, h, (x, y) => {
+        const X = x - cx;
+        const Y = y - gy;
+        const part = partAt(X, Y);
+        if (!part) return null;
+        if (part === 5) {
+          const sail = sails[x + y * w];
+          if (sail === 'hub') return X * X + (Y + WINDMILL.hub) ** 2 < 0.6 ? '#8f6a3f' : '#2b1d16';
+          if (sail === 'stock') return '#5c3e27';
+          if (sail === 'frame' || sail === 'bar') return sail === 'bar' ? '#b49a70' : '#8f6a3f';
+          return (x + y) % 7 === 0 ? '#e2d6bc' : '#f2ead6';
+        }
+        if (partAt(X + 1, Y) < part && partAt(X + 1, Y) !== 5 || partAt(X - 1, Y) < part && partAt(X - 1, Y) !== 5
+          || partAt(X, Y + 1) < part && partAt(X, Y + 1) !== 5 || partAt(X, Y - 1) < part && partAt(X, Y - 1) !== 5) {
+          return part === 1 ? OUTLINE.stone : OUTLINE.bark;
+        }
+        if (part === 3) return cap(X, Y, x, y);
+        if (part === 2) return inDoor(X, Y) ? door(X, Y, x, y) : pane(X, Y);
+        return tower(X, Y, x, y);
+      }));
+    }
+    return frames;
+  }
+
+  // An old well: a round wall of fieldstone with dark water deep inside, two
+  // posts holding a little roof of shakes, and a winch with its rope down to
+  // a bucket over the opening.
+  function stoneWell() {
+    const w = 24;
+    const h = 30;
+    const cx = w >> 1;
+    const gy = h - 1;
+    const rx = 9.5;
+    const ry = 3.2;
+    const rim = -9.5;    // the middle of the top of the wall
+    const base = -3.5;   // and of its foot
+    const span = (X) => Math.sqrt(Math.max(0, 1 - ((X + 0.5) / rx) ** 2));
+    const inWall = (X, Y) => Math.abs(X + 0.5) < rx && Y + 0.5 >= rim - ry * span(X) && Y + 0.5 <= base + ry * span(X);
+    const inTop = (X, Y) => ((X + 0.5) / rx) ** 2 + ((Y + 0.5 - rim) / ry) ** 2 < 1;
+    const inOpening = (X, Y) => ((X + 0.5) / 7) ** 2 + ((Y + 0.5 - rim) / 2.1) ** 2 < 1;
+    const partAt = (X, Y) => {
+      if (X < -cx || X >= w - cx || Y > 0 || Y < -gy) return 0;
+      if (Y >= -28 && Y <= -21 && Math.abs(X + 0.5) < Math.min(12, 3.5 + (Y + 28) * 1.25)) return 7;   // the roof
+      if (X >= -2 && X <= 1 && Y >= -12 && Y <= -9) return 6;   // the bucket
+      if (X === 0 && Y >= -15 && Y <= -13) return 5;             // its rope
+      if (Y >= -17 && Y <= -16 && X >= -8 && X <= 9) return 4;   // the winch, and its crank on the right
+      if (X === 9 && Y >= -16 && Y <= -14) return 4;
+      if ((X === -9 || X === 8) && Y >= -20 && Y <= -9) return 3;   // the posts
+      if (inOpening(X, Y)) return 2;
+      return inWall(X, Y) ? 1 : 0;
+    };
+    return pixelCanvas(w, h, (x, y) => {
+      const X = x - cx;
+      const Y = y - gy;
+      const part = partAt(X, Y);
+      if (!part) return null;
+      if (part === 5) return '#d8c8a0';
+      if (part !== 2 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => partAt(X + dx, Y + dy) < part && partAt(X + dx, Y + dy) !== 5)) {
+        return part === 1 ? OUTLINE.stone : OUTLINE.bark;
+      }
+      if (part === 7) return tone(SHAKES, 0.25 + ((X + 0.5) / 12) * 0.3 + ((Y + 28) % 2 === 0 ? 0.25 : 0), x, y, false);
+      if (part === 6) return Y === -11 ? '#6c645a' : tone(PLANKS, 0.35 + (X + 2) * 0.08, x, y, false);
+      if (part === 4) return X === 9 ? '#5a5a64' : tone(RAMPS.bark, Y === -17 ? 0.25 : 0.6, x, y, false);
+      if (part === 3) return tone(PLANKS, X < 0 ? 0.3 : 0.6, x, y, false);
+      if (part === 2) return Y + 0.5 > rim + 0.6 && Math.abs(X + 0.5) < 4 && (x + y) % 3 === 0 ? '#2e4a66' : '#14141c';
+      // The wall: the stones on top lit from above, the face in courses, lit from the left.
+      const course = Math.floor((base - Y) / 2.5);
+      if (inTop(X, Y)) return tone(FIELDSTONE, 0.12 + (hash(Math.floor((X + 20) / 3), 0, 503) - 0.5) * 0.2 + ((X + 0.5) / rx) * 0.2, x, y, false);
+      if (Math.floor(Math.asin(Math.max(-0.99, Math.min(0.99, (X + 0.5) / rx))) * rx + course * 2 + 20) % 4 === 0) return FIELDSTONE[4];
+      return tone(FIELDSTONE, 0.3 + ((X + 0.5) / rx) * 0.4 + (hash(Math.floor((X + course * 2 + 20) / 4), course, 504) - 0.5) * 0.3, x, y, false);
+    });
+  }
+
+  // A signpost: a post with four arrow boards, two pointing each way, with a
+  // little dark lettering on each.
+  function signpost() {
+    const w = 21;
+    const h = 24;
+    const cx = 10;
+    const gy = h - 1;
+    const boards = [{ top: -21, from: 0, to: 9, way: 1 }, { top: -17, from: -9, to: 0, way: -1 }, { top: -13, from: 0, to: 8, way: 1 }, { top: -9, from: -8, to: 0, way: -1 }];
+    const boardAt = (X, Y) => boards.find((board) => {
+      const row = Y - board.top;
+      if (row < 0 || row > 2) return false;
+      // The pointed end: the middle row reaches one pixel further.
+      const tip = board.way > 0 ? board.to + (row === 1 ? 1 : 0) : board.from - (row === 1 ? 1 : 0);
+      return board.way > 0 ? X >= board.from && X <= tip : X <= board.to && X >= tip;
+    });
+    const partAt = (X, Y) => {
+      if (X < -cx || X >= w - cx || Y > 0 || Y < -gy) return 0;
+      if (boardAt(X, Y)) return 2;
+      if ((X === -1 || X === 0) && Y >= -22) return 1;
+      return 0;
+    };
+    return pixelCanvas(w, h, (x, y) => {
+      const X = x - cx;
+      const Y = y - gy;
+      const part = partAt(X, Y);
+      if (!part) return null;
+      if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => partAt(X + dx, Y + dy) < part)) return OUTLINE.bark;
+      if (part === 1) return tone(PLANKS, X === -1 ? 0.3 : 0.6, x, y, false);
+      const board = boardAt(X, Y);
+      const row = Y - board.top;
+      if (row === 1 && X % 2 === 0 && Math.abs(X) >= 2 && Math.abs(X) <= 6) return '#3a2a1e';   // the lettering
+      return tone(PLANKS, row === 0 ? 0.08 : 0.2 + boards.indexOf(board) * 0.04, x, y, false);
+    });
+  }
+
+  // A park bench, seen from in front: two planks for the back and one for the
+  // seat, each three pixels deep, lit along its top and dark underneath, on
+  // dark iron ends with little arms.
+  function parkBench() {
+    const iron = ['#5a5a64', '#3c3c44'];
+    const w = 22;
+    const h = 14;
+    const cx = 11;
+    const gy = h - 1;
+    const plankRow = (Y) => [-13, -9, -5].map((top) => Y - top).find((row) => row >= 0 && row <= 2);
+    const partAt = (X, Y) => {
+      if (X < -cx || X >= w - cx || Y > 0 || Y < -gy) return 0;
+      if (plankRow(Y) !== undefined && X >= -9 && X <= 8) return 2;
+      if ((X === -10 || X === 9) && Y >= -13) return 1;   // the iron ends
+      if ((X === -11 || X === 10) && Y === -6) return 1;  // and their arms
+      return 0;
+    };
+    return pixelCanvas(w, h, (x, y) => {
+      const X = x - cx;
+      const Y = y - gy;
+      const part = partAt(X, Y);
+      if (!part) return null;
+      if (part === 1) return iron[Y < -6 ? 0 : 1];
+      return tone(PLANKS, [0.05, 0.32, 0.72][plankRow(Y)] + (X === -9 || X === 8 ? 0.2 : 0), x, y, false);
+    });
+  }
+
+  // A stone bird bath: a shallow basin on a short column, its water glinting.
+  // Four frames for the glints.
+  function birdBath() {
+    const w = 15;
+    const h = 15;
+    const cx = 7;
+    const gy = h - 1;
+    const rim = -10.5;
+    const span = (X, rx) => Math.sqrt(Math.max(0, 1 - ((X + 0.5) / rx) ** 2));
+    const inBowl = (X, Y) => Math.abs(X + 0.5) < 7 && Y + 0.5 >= rim - 2.6 * span(X, 7) && Y + 0.5 <= rim + 2 + 1.6 * span(X, 7);
+    const inWater = (X, Y) => ((X + 0.5) / 5.2) ** 2 + ((Y + 0.5 - rim) / 1.6) ** 2 < 1;
+    const partAt = (X, Y) => {
+      if (X < -cx || X >= w - cx || Y > 0 || Y < -gy) return 0;
+      if (inWater(X, Y)) return 3;
+      if (inBowl(X, Y)) return 2;
+      if (Y >= -7 && Y <= -2 && Math.abs(X + 0.5) < 1.6) return 1;   // the column
+      if (Y >= -1 && Math.abs(X + 0.5) < 3.6 - (Y + 1)) return 1;    // its foot
+      return 0;
+    };
+    return [0, 1, 2, 3].map((f) => pixelCanvas(w, h, (x, y) => {
+      const X = x - cx;
+      const Y = y - gy;
+      const part = partAt(X, Y);
+      if (!part) return null;
+      if (part === 3) {
+        const glint = (X + 3 - f * 2 + 8) % 8;
+        if (Y === Math.round(rim) && glint < 2) return '#d4eeff';
+        return (X + Y) % 2 === 0 ? '#4a90d9' : '#62a6e6';
+      }
+      if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => partAt(X + dx, Y + dy) < part)) return OUTLINE.stone;
+      return tone(RAMPS.granite, 0.2 + ((X + 0.5) / 7) * 0.45 + (part === 2 && Y + 0.5 > rim ? 0.25 : 0), x, y, false);
+    }));
+  }
+
+  // Lily pads on a pond, as a picture for each of the pond's frames, just big
+  // enough to hold them (`x`, `y` is its top left in the park): each pad a
+  // round leaf with a notch cut to its middle, lit from the top left, dipping
+  // a pixel now and then as the water moves; some carry a flower.
+  function padLayers(pads) {
+    const xs = pads.map((pad) => pad.x);
+    const ys = pads.map((pad) => pad.y);
+    const box = pads.length
+      ? { x: Math.floor(Math.min(...xs) - 7), y: Math.floor(Math.min(...ys) - 6), w: Math.ceil(Math.max(...xs) - Math.min(...xs)) + 15, h: Math.ceil(Math.max(...ys) - Math.min(...ys)) + 13 }
+      : { x: 0, y: 0, w: 1, h: 1 };
+    const frames = [0, 1, 2, 3].map((f) => {
+      const c = canvas(box.w, box.h);
+      const g = c.getContext('2d');
+      for (const pad of pads) {
+        const ox = Math.round(pad.x) - box.x;
+        const oy = Math.round(pad.y) - box.y + ((f + pad.phase) % 4 === 0 ? 1 : 0);
+        const ry = pad.r * 0.72;
+        const inside = (dx, dy) => {
+          if (((dx + 0.5) / pad.r) ** 2 + ((dy + 0.5) / ry) ** 2 >= 1) return false;
+          const gap = ((Math.atan2((dy + 0.5) / ry, (dx + 0.5) / pad.r) - pad.notch + Math.PI * 3) % TAU) - Math.PI;
+          return Math.abs(gap) > 0.38;
+        };
+        for (let dy = -Math.ceil(ry) - 1; dy <= Math.ceil(ry); dy++) {
+          for (let dx = -Math.ceil(pad.r) - 1; dx <= Math.ceil(pad.r); dx++) {
+            if (!inside(dx, dy)) continue;
+            const edge = !inside(dx - 1, dy) || !inside(dx + 1, dy) || !inside(dx, dy - 1) || !inside(dx, dy + 1);
+            const lit = (dx + 0.5) / pad.r + (dy + 0.5) / ry;
+            g.fillStyle = edge ? '#2a5a28' : lit < -0.6 ? '#8fd66a' : lit < 0.5 ? '#6cbf4a' : '#4f9a3c';
+            g.fillRect(ox + dx, oy + dy, 1, 1);
+          }
+        }
+        if (pad.flower) {
+          const petals = pad.pink ? '#f4b8c8' : '#f8f4f0';
+          g.fillStyle = petals;
+          g.fillRect(ox - 1, oy - 1, 3, 1);
+          g.fillRect(ox, oy - 2, 1, 3);
+          g.fillStyle = '#f0d040';
+          g.fillRect(ox, oy - 1, 1, 1);
+        }
+      }
+      return c;
+    });
+    return { x: box.x, y: box.y, frames };
+  }
+
   // ---- the catalogue ----
 
   // Where a bird could sit on a tree: the middle of the top row of a frame, as
@@ -1052,6 +1442,22 @@ const Scenery = (() => {
     hides: true, flickers: true, shadow: [104, 10], house: cabin.house,
     doors: cabin.doors, insideFloor: cabin.insideFloor, insideWalls: cabin.insideWalls, sill: cabin.sill, table: cabin.table, puffs: cabin.puffs,
   });
+  // The pond edges, the leaves, the windmill and the park's furniture (1.17).
+  // Reeds sway like the grass. A leaf pile's four pictures go from whole to
+  // scattered flat; the game picks one (`colors` are its leaves, for when it
+  // bursts). The mill's eight frames are its sails a sixteenth of a turn
+  // apart, which the game turns with the wind (`turns`); `hub` is where they
+  // turn, from the middle of its foot. The bird bath glints like the pond, and
+  // a jay can sit on its rim (`perch`).
+  define('reeds0', reedClump(601, false), { gain: 1 });
+  define('reeds1', reedClump(602, false), { gain: 1 });
+  define('cattails', reedClump(603, true), { gain: 1 });
+  define('leafPile', leafPile(604), { colors: AUTUMN });
+  define('mill', windmill(), { hides: true, turns: true, shadow: [32, 9], hub: { dx: 0, dy: -WINDMILL.hub } });
+  define('well', [stoneWell()], { shadow: [24, 7] });
+  define('signpost', [signpost()], { shadow: [8, 3] });
+  define('bench', [parkBench()], { shadow: [24, 6] });
+  define('birdBath', birdBath(), { perch: true, glints: true, shadow: [14, 4] });
 
   // Which frame of a prop shows for a given wind strength.
   function frameIndex(art, lean) {
@@ -1059,13 +1465,16 @@ const Scenery = (() => {
     return Math.max(0, Math.min(art.frames.length - 1, Math.round(art.rest + lean * art.gain)));
   }
 
-  // Running water changes frame this often, a second.
+  // Running water changes frame this often, a second; still water (a bird
+  // bath, 1.17) glints at the pond's pace.
   const FLOW_FRAMES_PER_SECOND = 6;
+  const GLINT_FRAMES_PER_SECOND = 2.5;
   const flowFrame = (clock) => Math.floor(clock * FLOW_FRAMES_PER_SECOND) % 4;
 
-  // The frame of a prop to draw for a given wind strength; running water and firelight go by the clock.
+  // The frame of a prop to draw for a given wind strength; running water, glints and firelight go by the clock.
   function frame(art, lean, clock = 0) {
     if (art.flows) return art.frames[flowFrame(clock)];
+    if (art.glints) return art.frames[Math.floor(clock * GLINT_FRAMES_PER_SECOND) % art.frames.length];
     if (art.flickers) return art.frames[flicker(clock)];
     return art.frames[frameIndex(art, lean)];
   }
@@ -1146,6 +1555,29 @@ const Scenery = (() => {
           g.fillStyle = rand() < 0.5 ? '#458a37' : '#74c257';
           g.fillRect(tx + Math.floor(rand() * 16), ty + Math.floor(rand() * 16), 1, 1);
         }
+      }
+    }
+    // Fallen leaves under each broadleaf tree (1.17), in its own autumn
+    // colours, thickest near the trunk and drifted a little downwind (to the
+    // right); a few blow onto the paths. Random numbers of their own, so the
+    // rest of the lawn is as it was.
+    const litter = seededRandom(17);
+    for (const prop of level.props) {
+      const art = props[prop.sprite];
+      const colors = art.leaves && LITTER[prop.sprite.replace(/\d+$/, '')];
+      if (!colors) continue;
+      const reach = art.frames[0].width * 0.42;
+      for (let i = Math.round(reach * 2.4); i > 0; i--) {
+        const angle = litter() * TAU;
+        const out = litter() ** 0.7 * reach;
+        const x = Math.round(prop.x + Math.cos(angle) * out + litter() * 7);
+        const y = Math.round(prop.y - 1 + Math.sin(angle) * out * 0.55);
+        const color = colors[Math.floor(litter() * colors.length)];
+        const long = litter() < 0.55;
+        if (x < border || x >= inner - 1 || y < border + 2 || y >= inner) continue;
+        if (pathAway[x + y * size] < paths[0].half && litter() < 0.7) continue;
+        g.fillStyle = color;
+        g.fillRect(x, y, long ? 2 : 1, 1);
       }
     }
     for (const prop of level.props) {
@@ -1244,7 +1676,9 @@ const Scenery = (() => {
       frames.push(made.frame);
       surface.push(made.surface);
     }
-    return { x: left, y: top, frames, surface };
+    // Its lily pads (1.17), laid over the sparkles: { x, y, frames }.
+    const pads = padLayers((level.pads || []).filter((pad) => pad.pond === 0));
+    return { x: left, y: top, frames, surface, pads };
   }
 
   // The stream from the foot of the waterfall into the second pond and on out
@@ -1373,7 +1807,9 @@ const Scenery = (() => {
       frames.push(frame);
       surface.push(sparkles);
     }
-    return { x: left, y: top, frames, surface, bridges };
+    // The second pond's lily pads (1.17), laid over the sparkles: { x, y, frames }.
+    const pads = padLayers((level.pads || []).filter((pad) => pad.pond === 1));
+    return { x: left, y: top, frames, surface, bridges, pads };
   }
 
   // A cloud's shadow: full strength in the middle, stepping down towards the edge.

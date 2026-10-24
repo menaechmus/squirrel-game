@@ -1,5 +1,7 @@
 // Weather: the wind that everything sways to, drifting cloud shadows, the
-// pond's ripple timing, leaves shaken loose in gusts, and the cabin's smoke.
+// pond's ripple timing, leaves shaken loose in gusts, and the cabin's smoke;
+// since 1.17 the windmill's sails, which the wind turns, and leaf piles that
+// burst when someone runs through them.
 
 const Effects = (() => {
   const POND_FRAMES_PER_SECOND = 2.5;
@@ -9,6 +11,14 @@ const Effects = (() => {
   // Chimney smoke: a puff this often (seconds), each lasting this long, rising
   // this fast (pixels a second) and drifting sideways with the wind.
   const SMOKE = { every: 0.42, life: 3.4, rise: 13, drift: 6, faint: 0.45 };
+  // The windmill's sails (1.17), in radians a second: this fast with no wind,
+  // this much faster for each unit the wind leans on them, never slower than
+  // `least` (they never stop or turn back).
+  const SAILS = { still: 0.8, perLean: 0.7, least: 0.3 };
+  // A leaf pile (1.17): someone this close to its middle (across, and up and
+  // down the screen) bursts it; it lies scattered for the first part of
+  // `flat` seconds, then builds back up. Each burst throws up this many leaves.
+  const PILE = { across: 9, upDown: 5, flat: 40, leaves: 22 };
 
   // How hard the wind pushes at a spot, roughly -1 (swinging back) to 2.5 (gust).
   // A slow swell and occasional strong gusts both travel left to right across
@@ -36,12 +46,19 @@ const Effects = (() => {
       speed: CLOUD_SPEED * (0.8 + rand() * 0.5),
     }));
     let leaves = [];
+    const mill = level.mill || null;
+    let sailTurn = 0;   // radians the sails have turned
+    const piles = (level.piles || []).map((spot) => ({ x: spot.x, y: spot.y, flat: 0 }));
+    const pileColors = (Scenery.props.leafPile && Scenery.props.leafPile.colors) || ['#e8602a'];
 
     function update(dt, clock) {
       for (const cloud of clouds) {
         cloud.x += cloud.speed * dt;
         if (cloud.x > level.size + 20) cloud.x = -cloud.sprite.width - 20;
       }
+      // The sails feel the wind up where they turn, not down on the grass.
+      if (mill) sailTurn += Math.max(SAILS.least, SAILS.still + lean(mill.x, mill.y - 37, clock) * SAILS.perLean) * dt;
+      for (const pile of piles) pile.flat = Math.max(0, pile.flat - dt);
       for (const tree of shedders) {
         if (rand() < LEAVES_PER_SECOND * dt && lean(tree.x, tree.y, clock) > LEAF_GUST) {
           const art = Scenery.props[tree.sprite];
@@ -60,9 +77,41 @@ const Effects = (() => {
       for (const leaf of leaves) {
         leaf.x += leaf.vx * dt;
         leaf.y += (leaf.vy + Math.sin(clock * 9 + leaf.wobble) * 18) * dt;
+        if (leaf.fall) {
+          // Thrown up from a pile: it slows, then drifts down.
+          leaf.vy += leaf.fall * dt;
+          leaf.vx *= Math.max(0, 1 - dt * 1.6);
+        }
         leaf.life -= dt;
       }
       leaves = leaves.filter((leaf) => leaf.life > 0);
+    }
+
+    // Anyone who runs into a whole leaf pile (`walkers`, each { x, y } at its
+    // feet) bursts it: its leaves fly up and flutter down, and it lies flat a
+    // while. Returns the piles burst just now.
+    function trample(walkers) {
+      const burst = [];
+      for (const pile of piles) {
+        if (pile.flat > 0 || !walkers.some((one) => ((one.x - pile.x) / PILE.across) ** 2 + ((one.y - pile.y + 2) / PILE.upDown) ** 2 < 1)) continue;
+        pile.flat = PILE.flat;
+        burst.push(pile);
+        for (let i = 0; i < PILE.leaves; i++) {
+          leaves.push({
+            x: pile.x + (rand() - 0.5) * 14, y: pile.y - 2 - rand() * 4,
+            vx: (rand() - 0.5) * 80, vy: -45 - rand() * 45, fall: 95,
+            life: 0.9 + rand() * 0.8, wobble: rand() * 6, color: pileColors[Math.floor(rand() * pileColors.length)],
+          });
+        }
+      }
+      return burst;
+    }
+
+    // Which of a leaf pile's four pictures to show: whole, or scattered flat
+    // for the first half of its time, then lower and lower as it builds back up.
+    function pileFrame(index) {
+      const left = piles[index] ? piles[index].flat / PILE.flat : 0;
+      return left > 0.5 ? 3 : left > 0.25 ? 2 : left > 0 ? 1 : 0;
     }
 
     function drawLeaves(ctx, camX, camY) {
@@ -117,6 +166,14 @@ const Effects = (() => {
       drawLeaves,
       drawSmoke,
       drawClouds,
+      trample,
+      pileFrame,
+      // The windmill's sails (1.17): which of `frames` frames (a quarter turn
+      // in all) to show, and how far they have turned, in radians.
+      sails: (frames) => Math.floor(((sailTurn % (Math.PI / 2)) / (Math.PI / 2)) * frames) % frames,
+      sailTurn: () => sailTurn,
+      // For tests: each leaf pile, and the leaves in the air.
+      inspect: () => ({ piles, leaves }),
     };
   }
 

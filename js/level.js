@@ -10,6 +10,7 @@ const Level = (() => {
   const ACORNS_BY_TREES = 18;
   const ACORNS_BY_BUSHES = 12;
   const TUFT_COUNT = 260;
+  const TAU = Math.PI * 2;
 
   // ---- what stays where it is ----
   // The first pond, in the north-west.
@@ -42,6 +43,31 @@ const Level = (() => {
   // and its east shore clear of the path; the second spreads north and west,
   // its south shore and the lower bridge where they were.
   const GROWN_PONDS = [{ x: 388, y: 104, a: 70, b: 143 }, { x: 740, y: 826, a: 52, b: 30 }];
+
+  // ---- the south-west and the landmarks (1.17) ----
+  // Added after the ponds grow, so again nothing else moves; fitted to the
+  // park by drawing them on its map first. A small windmill and an old well
+  // by the south hedge, west of the north-south path; a signpost at the
+  // crossing, clear of where the squirrels start; three benches beside the
+  // paths (across the path from the big pond, east of the crossing, and by
+  // the mill); and a bird bath on the lawn east of the crossing. `ground` is
+  // what each stands on, as circles [dx, dy, r] from its foot; `solid`,
+  // whether creatures go round it (benches they run under).
+  const LANDMARKS = [
+    { sprite: 'mill', x: 352, y: 888, ground: [[-5, -6, 8], [5, -6, 8]], solid: true },
+    { sprite: 'well', x: 312, y: 900, ground: [[0, -4, 9]], solid: true },
+    { sprite: 'signpost', x: 503, y: 452, ground: [[0, -1, 2]], solid: true },
+    { sprite: 'birdBath', x: 588, y: 545, ground: [[0, -2, 4]], solid: true },
+    { sprite: 'bench', x: 512, y: 140, ground: [[-6, -4, 5], [6, -4, 5]], solid: false },
+    { sprite: 'bench', x: 560, y: 452, ground: [[-6, -4, 5], [6, -4, 5]], solid: false },
+    { sprite: 'bench', x: 446, y: 862, ground: [[-6, -4, 5], [6, -4, 5]], solid: false },
+  ];
+  // Reeds and cattails in clumps along parts of each pond's shore and of the
+  // stream's banks (repeats make a kind more common); lily pads in a few
+  // clusters on each pond; leaf piles under broadleaf trees, spread across the park.
+  const REEDS = { ponds: [11, 6], stream: 7, apart: 16, kinds: ['reeds0', 'reeds0', 'reeds0', 'reeds1', 'reeds1', 'cattails', 'cattails'] };
+  const PADS = { clusters: [3, 2], each: [3, 5] };
+  const PILES = { count: 12, apart: 70, fromAcorns: 16, fromStart: 60 };
 
   // ---- the paths ----
   // Two dirt paths, one north to south and one west to east, crossing where
@@ -366,6 +392,12 @@ const Level = (() => {
     // An acorn just behind the cabin would be hidden by its roof.
     const cabinPicture = Scenery.props.cabin.frames[0];
     const behindCabin = (x, y) => Math.abs(x - cabin.x) < cabinPicture.width / 2 + 2 && y < cabin.y && y > cabin.y - cabinPicture.height - 4;
+    // Once they stand (1.17), one just behind a landmark would be hidden by it,
+    // and one beside a leaf pile lost among its leaves.
+    const landmarks = [];
+    const pileSpots = [];
+    const behindLandmark = (x, y) => landmarks.some((one) => Math.abs(x - one.x) < one.half + 2 && y < one.y && y > one.y - one.height - 4);
+    const nearPile = (x, y) => pileSpots.some((pile) => Math.hypot(x - pile.x, y - pile.y) < PILES.fromAcorns);
 
     // An acorn is unfair if a tree further down the screen draws over it.
     const trees = props.filter((prop) => Scenery.props[prop.sprite].hides && Scenery.props[prop.sprite].tops);
@@ -488,6 +520,9 @@ const Level = (() => {
         || solids.some((solid) => Math.hypot(x - solid.x, y - solid.y) < solid.r + radius)
         || onMountain(x, y, radius) || inStream(x, y, radius) || inHouse(x, y, radius);
     }
+    // The same, water aside: somewhere a frog could sit on the bank (1.17).
+    const standsClear = (x, y, radius) => inPark(x, y, radius) && !onMountain(x, y, radius) && !inHouse(x, y, radius)
+      && !solids.some((solid) => Math.hypot(x - solid.x, y - solid.y) < solid.r + radius);
 
     // ---- finding the way ----
     // A cell is open if a creature could stand in its middle with room to spare.
@@ -712,8 +747,10 @@ const Level = (() => {
     };
     // The rules every acorn keeps, here and when Explore grows a new one: in
     // the park, clear of water, the mountain and anything solid, not under a
-    // tree top or the cabin's roof, and somewhere the squirrel can get to.
-    const acornFits = (x, y) => inPark(x, y, 6) && !inFeature(x, y, 13) && !hiddenByTree(x, y) && !behindCabin(x, y) && !blocked(x, y, 6) && canReach(x, y);
+    // tree top, the cabin's roof or a landmark, not by a leaf pile, and
+    // somewhere the squirrel can get to.
+    const acornFits = (x, y) => inPark(x, y, 6) && !inFeature(x, y, 13) && !hiddenByTree(x, y) && !behindCabin(x, y)
+      && !behindLandmark(x, y) && !nearPile(x, y) && !blocked(x, y, 6) && canReach(x, y);
     const acorns = [];
     // A tucked acorn sits right beside its tree or bush, inside that prop's own
     // elbow room, so it is checked against trunks, rocks and other acorns instead.
@@ -766,36 +803,78 @@ const Level = (() => {
       if (!inFeature(x, y, 5) && !onPath(x, y, -2)) props.push({ sprite: 'tuft', x, y });
     }
 
+    // ---- later steps (1.16 on) ----
+    // Each adds something once the park is laid out, so nothing laid out
+    // before it moves. Whatever its ground covers or crowds is cleared, the
+    // route grid round it is worked out again, and the acorns that no longer
+    // keep the rules, or whose trunk or bush was cleared, are laid again
+    // elsewhere, so there are as many as ever. `took` lists, for the layout
+    // check, what each step took away.
+    const cellAt = (v) => Math.floor(v / CELL);
+    function clearAway(crowded, gone, took) {
+      for (let i = props.length - 1; i >= 0; i--) {
+        const prop = props[i];
+        if (prop.sprite === 'mountain' || prop.sprite === 'cabin' || !crowded(prop)) continue;
+        props.splice(i, 1);
+        gone.add(prop);
+        for (let k = solids.length - 1; k >= 0; k--) if (solids[k].owner === prop) solids.splice(k, 1);
+        const log = logs.findIndex((each) => each.x === prop.x && each.y === prop.y);
+        if (log >= 0) logs.splice(log, 1);
+        if (trees.includes(prop)) trees.splice(trees.indexOf(prop), 1);
+        if (prop.sprite !== 'tuft') took.push([prop.sprite, prop.x, prop.y]);
+      }
+    }
+    // Lay again each acorn that has to go, the way it was: beside another
+    // trunk or bush, or in the open, drawing on `random`. Each new one takes
+    // the taken one's place in the list, so every other acorn keeps its
+    // number (tests address acorns by number).
+    function layAgain(random, gone, took) {
+      const lost = { tree: 0, bush: 0 };
+      const vacated = [];   // the places in the list of those taken, lowest first
+      for (let i = acorns.length - 1; i >= 0; i--) {
+        const acorn = acorns[i];
+        const tucked = tuckedBy.get(acorn);
+        if (acornFits(acorn.x, acorn.y) && !(tucked && gone.has(tucked.by))) continue;
+        took.push([acorn.x, acorn.y]);
+        if (tucked) lost[tucked.kind]++;
+        acorns.splice(i, 1);
+        vacated.unshift(i);
+      }
+      const kept = acorns.length;
+      const mixed = (list) => list.map((item) => [random(), item]).sort((a, b) => a[0] - b[0]).map((pair) => pair[1]);
+      const tuckAgain = (beside, kind, dx, dy, count) => {
+        for (const prop of mixed(beside)) {
+          if (count <= 0) break;
+          if (tryAcorn(prop.x + (random() < 0.5 ? -dx : dx), prop.y + dy, true)) {
+            count--;
+            tuckedBy.set(acorns[acorns.length - 1], { kind, by: prop });
+          }
+        }
+      };
+      tuckAgain(trees, 'tree', 12, 3, lost.tree);
+      tuckAgain(props.filter((prop) => prop.sprite.startsWith('bush')), 'bush', 13, 2, lost.bush);
+      for (let attempt = 0; attempt < 3000 && acorns.length < ACORN_COUNT; attempt++) {
+        tryAcorn(Math.round(BORDER + 12 + random() * (SIZE - 2 * BORDER - 24)), Math.round(BORDER + 24 + random() * (SIZE - 2 * BORDER - 36)));
+      }
+      acorns.splice(kept).forEach((acorn, k) => acorns.splice(vacated[k], 0, acorn));
+    }
+
     // ---- the ponds grow (1.16) ----
-    // Last of all, so nothing laid out above moves. Whatever the bigger water
-    // covers or crowds is cleared: anything solid within 8 px of it, a bush,
-    // flower or mushroom within 8 px, a tuft within 5 (as tufts are placed).
-    // The route grid round both ponds is worked out again, and acorns that no
-    // longer keep the rules, or whose trunk or bush was cleared, are laid
-    // again elsewhere the way they were, so there are as many as ever.
+    // Last of the original park, so nothing laid out above moves. Whatever the
+    // bigger water covers or crowds is cleared: anything solid within 8 px of
+    // it, a bush, flower or mushroom within 8 px, a tuft within 5 (as tufts
+    // are placed). The acorns are laid again with the park's own random numbers.
     const flooded = { props: [], acorns: [] };
     const before = ponds.map(({ x, y, a, b }) => ({ x, y, a, b }));
     ponds.forEach((each, i) => Object.assign(each, GROWN_PONDS[i], { before: before[i] }));
-    const crowded = (prop) => {
+    const washedAway = new Set();
+    clearAway((prop) => {
       const own = solids.filter((solid) => solid.owner === prop);
       if (own.length) return own.some((solid) => inAnyPond(solid.x, solid.y, solid.r + 8));
       return inAnyPond(prop.x, prop.y, prop.sprite === 'tuft' ? 5 : 8);
-    };
-    const washedAway = new Set();
-    for (let i = props.length - 1; i >= 0; i--) {
-      const prop = props[i];
-      if (prop.sprite === 'mountain' || prop.sprite === 'cabin' || !crowded(prop)) continue;
-      props.splice(i, 1);
-      washedAway.add(prop);
-      for (let k = solids.length - 1; k >= 0; k--) if (solids[k].owner === prop) solids.splice(k, 1);
-      const log = logs.findIndex((each) => each.x === prop.x && each.y === prop.y);
-      if (log >= 0) logs.splice(log, 1);
-      if (trees.includes(prop)) trees.splice(trees.indexOf(prop), 1);
-      if (prop.sprite !== 'tuft') flooded.props.push([prop.sprite, prop.x, prop.y]);
-    }
+    }, washedAway, flooded.props);
     // The cells round each pond as it was and as it is, far enough out to take
     // in what was cleared from its shore.
-    const cellAt = (v) => Math.floor(v / CELL);
     ponds.forEach((each, i) => {
       const was = before[i];
       const out = 48;
@@ -803,40 +882,151 @@ const Level = (() => {
         cellAt(Math.min(was.y - was.b, each.y - each.b) - out), cellAt(Math.max(was.y + was.b, each.y + each.b) + 5 + out));
     });
     reachable = reachableFrom(spawn);
-    const lost = { tree: 0, bush: 0 };
-    const vacated = [];   // the places in the list of those taken, lowest first
-    for (let i = acorns.length - 1; i >= 0; i--) {
-      const acorn = acorns[i];
-      const tucked = tuckedBy.get(acorn);
-      if (acornFits(acorn.x, acorn.y) && !(tucked && washedAway.has(tucked.by))) continue;
-      flooded.acorns.push([acorn.x, acorn.y]);
-      if (tucked) lost[tucked.kind]++;
-      acorns.splice(i, 1);
-      vacated.unshift(i);
-    }
-    const kept = acorns.length;
-    // Each laid again as it was: beside another trunk or bush, or in the open.
-    const tuckAgain = (beside, dx, dy, count) => {
-      for (const prop of shuffled(beside)) {
-        if (count <= 0) break;
-        if (tryAcorn(prop.x + (rand() < 0.5 ? -dx : dx), prop.y + dy, true)) count--;
+    layAgain(rand, washedAway, flooded.acorns);
+
+    // ---- the south-west and the landmarks (1.17) ----
+    // After the ponds grow, with random numbers of its own: the landmarks
+    // where they were fitted, clearing what stood on their ground as the ponds
+    // did; then reeds and cattails at the water's edge, lily pads on the
+    // ponds, and leaf piles under broadleaf trees.
+    const later = seededRandom(SEED + 117);
+    const added = { props: [], acorns: [] };
+    const madeRoom = new Set();
+    const footprints = LANDMARKS.map((one) => one.ground.map(([dx, dy, r]) => ({ x: one.x + dx, y: one.y + dy, r })));
+    const ground = footprints.flat();
+    // A flower or the like just behind a landmark would be half hidden by it: that goes too.
+    const behindAPicture = (prop) => LANDMARKS.some((one) => {
+      const picture = Scenery.props[one.sprite].frames[0];
+      return Math.abs(prop.x - one.x) < picture.width / 2 && prop.y < one.y && prop.y > one.y - picture.height;
+    });
+    clearAway((prop) => {
+      const own = solids.filter((solid) => solid.owner === prop);
+      if (own.length) return own.some((solid) => ground.some((spot) => Math.hypot(solid.x - spot.x, solid.y - spot.y) < solid.r + spot.r + 8));
+      return ground.some((spot) => Math.hypot(prop.x - spot.x, prop.y - spot.y) < spot.r + (prop.sprite === 'tuft' ? 5 : 8)) || behindAPicture(prop);
+    }, madeRoom, added.props);
+    LANDMARKS.forEach((one, i) => {
+      const prop = { sprite: one.sprite, x: one.x, y: one.y };
+      props.push(prop);
+      for (const spot of footprints[i]) {
+        taken.push(spot);
+        if (one.solid) solids.push({ x: spot.x, y: spot.y, r: spot.r, owner: prop });
       }
+      const picture = Scenery.props[one.sprite].frames[0];
+      landmarks.push({ x: one.x, y: one.y, half: picture.width / 2, height: picture.height });
+    });
+
+    // Reeds and cattails: clumps along parts of each pond's shore, standing in
+    // the shallows where the water is drawn to end, and along the stream's
+    // banks; never in the hedge, on a path, by a bridge or the waterfall's
+    // pool, beside an acorn or a trunk, or crowding another clump.
+    const reedSpots = [];
+    const reedRoom = (x, y) => x > BORDER + 6 && x < SIZE - BORDER - 6 && y > BORDER + 8 && y < SIZE - BORDER - 8 && !onPath(x, y, 6)
+      && streams.every(({ bridge }) => Math.hypot(x - bridge.x, y - bridge.y) > 26)
+      && Math.hypot(x - falls.x, y - falls.y) > 36 && !onMountain(x, y, 6)
+      && acorns.every((acorn) => Math.hypot(x - acorn.x, y - acorn.y) > 12)
+      && solids.every((solid) => Math.hypot(x - solid.x, y - solid.y) > solid.r + 6)
+      && reedSpots.every((spot) => Math.hypot(x - spot.x, y - spot.y) > REEDS.apart);
+    const addReeds = (x, y) => {
+      reedSpots.push({ x, y });
+      props.push({ sprite: REEDS.kinds[Math.floor(later() * REEDS.kinds.length)], x, y });
     };
-    tuckAgain(trees, 12, 3, lost.tree);
-    tuckAgain(props.filter((prop) => prop.sprite.startsWith('bush')), 13, 2, lost.bush);
-    for (let attempt = 0; attempt < 3000 && acorns.length < ACORN_COUNT; attempt++) {
-      tryAcorn(Math.round(range(BORDER + 12, SIZE - BORDER - 12)), Math.round(range(BORDER + 24, SIZE - BORDER - 12)));
+    ponds.forEach((each, index) => {
+      for (let count = 0, attempt = 0; attempt < 300 && count < REEDS.ponds[index]; attempt++) {
+        const t = later() * TAU;
+        // Where pondWater draws the edge of the water, along this way out from the middle.
+        const k = 0.97 / Math.sqrt(1 + 0.05 * Math.sin(6 * Math.atan2(each.b * Math.sin(t), each.a * Math.cos(t))));
+        const x = Math.round(each.x + Math.cos(t) * each.a * k);
+        const y = Math.round(each.y + Math.sin(t) * each.b * k);
+        if (streamPoints.some((point) => Math.hypot(x - point.x, y - point.y) < point.half + 12) || !reedRoom(x, y)) continue;
+        addReeds(x, y);
+        count++;
+      }
+    });
+    for (let count = 0, attempt = 0; attempt < 300 && count < REEDS.stream; attempt++) {
+      const stretch = streams[Math.floor(later() * streams.length)];
+      const i = Math.floor(later() * stretch.points.length);
+      const at = stretch.points[i];
+      const ahead = stretch.points[Math.min(stretch.points.length - 1, i + 2)];
+      const behind = stretch.points[Math.max(0, i - 2)];
+      const length = Math.hypot(ahead.x - behind.x, ahead.y - behind.y) || 1;
+      const side = later() < 0.5 ? -1 : 1;
+      const x = Math.round(at.x - (side * (ahead.y - behind.y) * (at.half + 0.5)) / length);
+      const y = Math.round(at.y + (side * (ahead.x - behind.x) * (at.half + 0.5)) / length);
+      if ((stretch === streams[0] && at.s < 34) || inAnyPond(x, y, 6) || !reedRoom(x, y)) continue;
+      addReeds(x, y);
+      count++;
     }
-    // Each new one takes the place in the list of one taken, so every other acorn keeps its number.
-    acorns.splice(kept).forEach((acorn, k) => acorns.splice(vacated[k], 0, acorn));
+
+    // Lily pads: a few clusters on each pond, towards the shore but in the
+    // water, below the top hedge, and clear of the stream where it runs in and out.
+    const pads = [];
+    ponds.forEach((each, index) => {
+      for (let clusters = 0, attempt = 0; attempt < 120 && clusters < PADS.clusters[index]; attempt++) {
+        const t = later() * TAU;
+        const k = 0.6 + later() * 0.17;
+        const x = each.x + Math.cos(t) * each.a * k;
+        const y = each.y + Math.sin(t) * each.b * k;
+        if (y < BORDER + 28 || streamPoints.some((point) => Math.hypot(x - point.x, y - point.y) < 26)
+          || pads.some((pad) => Math.hypot(x - pad.x, y - pad.y) < 34)) continue;
+        clusters++;
+        const count = PADS.each[0] + Math.floor(later() * (PADS.each[1] - PADS.each[0] + 1));
+        for (let placed = 0, tries = 0; placed < count && tries < 40; tries++) {
+          const px = Math.round(x + (later() - 0.5) * 20);
+          const py = Math.round(y + (later() - 0.5) * 11);
+          const n = ((px - each.x) / each.a) ** 2 + ((py - each.y) / each.b) ** 2;
+          if (n > 0.78 || n < 0.25 || py < BORDER + 24 || pads.some((pad) => Math.hypot(px - pad.x, py - pad.y) < 7)) continue;
+          pads.push({ pond: index, x: px, y: py, r: 2.6 + later() * 1.5, notch: later() * TAU, flower: later() < 0.3, pink: later() < 0.4, phase: Math.floor(later() * 4) });
+          placed++;
+        }
+      }
+    });
+
+    // Leaf piles under the broadleaf trees: in front of or beside a trunk, on
+    // open ground, spread across the park; never on a path, near the start,
+    // by an acorn, under a tree top or a landmark, or crowding anything else.
+    const owners = new Set(solids.map((solid) => solid.owner));
+    const mixed = (list) => list.map((item) => [later(), item]).sort((a, b) => a[0] - b[0]).map((pair) => pair[1]);
+    for (const tree of mixed(trees.filter((each) => Scenery.props[each.sprite].leaves))) {
+      if (pileSpots.length >= PILES.count) break;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const x = Math.round(tree.x + (later() < 0.5 ? -1 : 1) * (5 + later() * 13));
+        const y = Math.round(tree.y + 4 + later() * 10);
+        if (!inPark(x, y, 12) || inFeature(x, y, 12) || onPath(x, y, 6) || hiddenByTree(x, y) || behindCabin(x, y) || behindLandmark(x, y)
+          || Math.hypot(x - spawn.x, y - spawn.y) < PILES.fromStart
+          || solids.some((solid) => Math.hypot(x - solid.x, y - solid.y) < solid.r + 9)
+          || props.some((prop) => prop.sprite !== 'tuft' && !owners.has(prop) && Math.hypot(x - prop.x, y - prop.y) < 11)
+          || acorns.some((acorn) => Math.hypot(x - acorn.x, y - acorn.y) < PILES.fromAcorns + 2)
+          || pileSpots.some((spot) => Math.hypot(x - spot.x, y - spot.y) < PILES.apart)) continue;
+        props.push({ sprite: 'leafPile', x, y, pile: pileSpots.length });
+        pileSpots.push({ x, y });
+        break;
+      }
+    }
+    // Grass tufts don't poke up through a clump of reeds or a pile of leaves.
+    clearAway((prop) => prop.sprite === 'tuft' && reedSpots.concat(pileSpots).some((spot) => Math.hypot(prop.x - spot.x, prop.y - spot.y) < 6), madeRoom, added.props);
+
+    // The route grid round each landmark creatures go round, then the acorns.
+    for (const one of LANDMARKS.filter((each) => each.solid)) {
+      fillCells(cellAt(one.x - 48), cellAt(one.x + 48), cellAt(one.y - 60), cellAt(one.y + 48));
+    }
+    reachable = reachableFrom(spawn);
+    layAgain(later, madeRoom, added.acorns);
     props.sort((a, b) => a.y - b.y);
 
+    const landmarkAt = (sprite) => LANDMARKS.filter((one) => one.sprite === sprite).map(({ x, y }) => ({ x, y }));
     return {
       size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, falls, paths, logs, props, acorns, cabin,
-      pushOut, blocked, nearestWater, acornFits, newAcornSpot, wayTo, nearestByWay, clearLine, distancesFrom, distanceTo,
-      // For tests: the copses, the cabin's walls, what the ponds took as they grew, and the route grid.
+      pushOut, blocked, standsClear, nearestWater, acornFits, newAcornSpot, wayTo, nearestByWay, clearLine, distancesFrom, distanceTo, onPath,
+      // The landmarks (1.17): the mill, the well, the signpost, the benches and
+      // the bird bath; lily pads on the ponds, as { pond, x, y, r, notch,
+      // flower, pink, phase }; and the leaf piles (each pile's prop carries its
+      // number in this list as `pile`).
+      mill: landmarkAt('mill')[0], well: landmarkAt('well')[0], signpost: landmarkAt('signpost')[0], birdBath: landmarkAt('birdBath')[0],
+      benches: landmarkAt('bench'), pads, piles: pileSpots, reeds: reedSpots,
+      // For tests: the copses, the cabin's walls, what the ponds took as they
+      // grew and the landmarks took as they went up, and the route grid.
       copses: copses.map((copse) => ({ x: copse.x, y: copse.y, radius: copse.radius, trees: copse.trees.length })),
-      boxes, flooded,
+      boxes, flooded, added,
       grid: { cell: CELL, cols: COLS, open, isOpen: (x, y) => open[cellOf(x, y)] === 1 },
     };
   }

@@ -577,6 +577,58 @@ const Sprites = (() => {
     };
   }
 
+  // A frog (1.17): sitting, looking out of the screen, two eyes up on top of
+  // its head, a wide mouth, its pale throat and its legs folded at its sides
+  // (the same either way it faces); and side on, stretched out in mid-plop,
+  // facing right.
+  const FROG_COLORS = { f: '#5aa03a', F: '#3a7a2a', p: '#cfe27a', e: '#1a1a1a' };
+  const FROG_SITTING = [
+    '..kk...kk..',
+    '.kwwk.kwwk.',
+    '.kwek.kewk.',
+    'kfffffffffk',
+    'kfkkkkkkkFk',
+    'kfpppppppFk',
+    'kFkpppppkFk',
+    '.kk.kkk.kk.',
+  ];
+  const FROG_LEAPING = [
+    '.......kkk..',
+    '.kkk.kkfwek.',
+    'kFFkkffffffk',
+    '.kkkFfffpppk',
+    '.....kkkkk..',
+  ];
+  function frog() {
+    const sitting = fromText(FROG_SITTING, FROG_COLORS);
+    const leaping = fromText(FROG_LEAPING, FROG_COLORS);
+    return { sitting: { right: sitting, left: sitting }, leaping: { right: leaping, left: mirrored(leaping) } };
+  }
+
+  // A dragonfly from above (1.17), facing right: a long bright body with a
+  // dark head and tail tip, and four clear wings, spread and then swept
+  // back, beating fast.
+  const DRAGONFLY = [
+    [
+      '..vv.vv..',
+      '..vv.vv..',
+      'BbbbbbbBB',
+      '..vv.vv..',
+      '..vv.vv..',
+    ],
+    [
+      '.........',
+      '.vv.vv...',
+      'BbbbbbbBB',
+      '.vv.vv...',
+      '.........',
+    ],
+  ];
+  function dragonfly() {
+    const right = DRAGONFLY.map((rows) => fromText(rows, { b: '#46d0ea', B: '#1a4a7a', v: '#eef8ff88' }));
+    return { right, left: right.map(mirrored) };
+  }
+
   // Rings of ripples spreading from a splash, smallest first; the smallest
   // also marks a duck's wake.
   function ripple(rx, ry) {
@@ -631,5 +683,8 @@ const Sprites = (() => {
     fishLeaping: { plain: fishLeaping(LEAP_COLORS.plain), gold: fishLeaping(LEAP_COLORS.gold) },
     mallard: { drake: mallard(MALLARD.drake), hen: mallard(MALLARD.hen) },
     ripples: [ripple(2, 1), ripple(4, 2), ripple(6, 3)],
+    // At the ponds' edges (1.17).
+    frog: frog(),
+    dragonfly: dragonfly(),
   };
 })();

@@ -77,6 +77,8 @@ const Rivals = (() => {
         clearOfPlayer: 48,          // never lands this close to the player...
         flushWithin: 30,            // ...and one on the grass takes off if the player walks up
         clearOfAcorns: 30,          // nor beside an acorn, where a thief would be
+        birdBath: 0.45,             // how often it picks the bird bath, when that is free where it is looking (1.17)...
+        splashEvery: [1.5, 4],      // ...and how often, sitting on its rim, it flicks up drops
       },
       popUp: {
         first: 3,
@@ -145,6 +147,7 @@ const Rivals = (() => {
       const perch = { tree: prop, art, x: prop.x + top.x, y: prop.y, z: top.y - 2 };
       if (!underTreeTop(perch.x, perch.y - perch.z, prop.y)) treeTops.push(perch);
     }
+    const birdBath = treeTops.find((perch) => perch.tree.sprite === 'birdBath') || null;
 
     let active = false;
     let jay = {};
@@ -723,6 +726,12 @@ const Rivals = (() => {
     function perchSpot(zone, treeZone, soon) {
       const tuning = TUNING.extras.perch;
       const inTreeZone = (feet) => feet.x > treeZone.x && feet.x < treeZone.x + treeZone.w && feet.y > treeZone.y && feet.y < treeZone.y + treeZone.h;
+      // The bird bath (1.17), a perch like a tree top, but with a chance of its own.
+      const bath = birdBath && { x: birdBath.x, y: birdBath.y - birdBath.z };
+      if (bath && inTreeZone(bath) && !perchers.some((bird) => bird.spot === birdBath)
+        && !world.acorns().some((acorn) => near(acorn, bath, tuning.clearOfAcorns)) && extraRandom() < tuning.birdBath) {
+        return birdBath;
+      }
       if (extraRandom() < tuning.onTree) {
         const free = treeTops.filter((top) => {
           const feet = { x: top.x, y: top.y - top.z };
@@ -848,6 +857,14 @@ const Rivals = (() => {
           if (bird.turn <= 0) {
             bird.facing = bird.facing === 'left' ? 'right' : 'left';
             bird.turn = pick(tuning.turn);
+          }
+          // On the bird bath it dips in now and then and flicks up drops.
+          if (bird.spot === birdBath && world.splash) {
+            bird.splashIn = (bird.splashIn === undefined ? pick(tuning.splashEvery) : bird.splashIn) - dt;
+            if (bird.splashIn <= 0) {
+              bird.splashIn = pick(tuning.splashEvery);
+              world.splash({ x: seat.x + (bird.facing === 'right' ? 2 : -2), y: seat.y - seat.z + 2 });
+            }
           }
           if (bird.timer <= 0) takeOff(bird, view, false);
         }
@@ -1099,8 +1116,17 @@ const Rivals = (() => {
       return list;
     }
 
+    // Who is walking about, for leaf piles to burst (1.17): the grey squirrels,
+    // and the groundhog while it is out of its hole. It only looks.
+    function walkers() {
+      if (!active) return [];
+      const list = squirrels.map((squirrel) => ({ x: squirrel.x, y: squirrel.y }));
+      if (isOut(hog)) list.push({ x: hog.x, y: hog.y });
+      return list;
+    }
+
     return {
-      reset, update, decals, shadows, things, flyers, voices,
+      reset, update, decals, shadows, things, flyers, voices, walkers,
       // For tests: a live view of each creature's state.
       inspect: () => ({ jay, hog, squirrels, holes, passers, perchers, visitors }),
     };

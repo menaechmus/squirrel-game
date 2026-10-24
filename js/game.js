@@ -104,7 +104,7 @@
   const sounds = Sound.create();
 
   const world = {
-    level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView, puff,
+    level, player, acorns: () => acorns, take: takeAcorn, random, sound, view: cameraView, puff, splash,
     wind: (x, y) => effects.lean(x, y, clock),
   };
   // One player has the thieves to contend with; friends race each other, with
@@ -170,7 +170,10 @@
 
   // What the squirrel can hear from where it stands: the nearest water, the
   // waterfall, leaves in a gust (more trees round it, more rustle), the
-  // animals up to something, and the cabin's fire.
+  // animals up to something (and leaf piles bursting), the cabin's fire, and
+  // the windmill's sails (where they are, and how far they have turned).
+  let rustles = [];   // leaf piles burst this update (1.17), heard once
+  const mill = level.mill;
   function listen(dt) {
     const trees = leafy.filter((tree) => Math.abs(tree.x - player.x) < 110 && Math.abs(tree.y - player.y) < 110).length;
     const gust = Math.max(0, Math.min(1, (effects.gust(player.x, clock) - 0.15) / 0.6));
@@ -179,8 +182,9 @@
       water: level.nearestWater(player.x, player.y),
       falls: { distance: Math.hypot(level.falls.x - player.x, level.falls.y - player.y), dx: level.falls.x - player.x },
       breeze: gust * Math.min(1, trees / 5),
-      voices: rivals.voices().concat(waterLife.voices()),
+      voices: rivals.voices().concat(waterLife.voices(), rustles),
       fire: { distance: Math.hypot(cabin.hearth.x - player.x, cabin.hearth.y - player.y), dx: cabin.hearth.x - player.x },
+      mill: mill && { distance: Math.hypot(mill.x - player.x, mill.y - 30 - player.y), dx: mill.x - player.x, turn: effects.sailTurn() },
     });
   }
 
@@ -328,7 +332,10 @@
     particles = [];
     time = 0;
     readyIn = 0;
-    if (auto) auto.noclips = 0;   // the test hook reports stalls per round
+    if (auto) {
+      auto.noclips = 0;   // the test hook reports stalls per round...
+      auto.piles = 0;     // ...and how many leaf piles were burst, by anyone (1.17)
+    }
     state = 'playing';
     rivals = duo ? rivalsTogether : rivalsAlone;
     rivals.reset();
@@ -520,7 +527,7 @@
     el('mute-menu').hidden = false;
     el('again').focus();
     if (auto) {
-      document.body.dataset.result = `you=${counts.you} jays=${counts.jays} groundhogs=${counts.groundhogs} squirrels=${counts.squirrels} total=${total} time=${time.toFixed(1)} noclips=${auto.noclips} golden=${golden === 'you' ? 1 : 0}`;
+      document.body.dataset.result = `you=${counts.you} jays=${counts.jays} groundhogs=${counts.groundhogs} squirrels=${counts.squirrels} total=${total} time=${time.toFixed(1)} noclips=${auto.noclips} golden=${golden === 'you' ? 1 : 0} piles=${auto.piles}`;
       if (params.has('restart')) {
         // After this update is over: a round can end part-way through one, and Play again resets the rivals.
         setTimeout(() => {
@@ -662,6 +669,10 @@
     // After the round the rivals carry on, so a jay still flies off with its prize.
     rivals.update(dt);
     waterLife.update(dt);
+    // A leaf pile bursts when anyone runs into it (1.17): this squirrel, the
+    // others in a game with friends, a grey squirrel or a groundhog out of its hole.
+    rustles = effects.trample([player, ...shownOthers(), ...rivals.walkers()]).map((pile) => ({ who: {}, kind: 'rustle', x: pile.x, y: pile.y }));
+    if (auto && state === 'playing') auto.piles += rustles.length;
     if (sounds.context()) listen(dt);
     if (duo) animateOthers(dt);
     if (state !== 'playing') return;
@@ -792,6 +803,9 @@
     ctx.globalAlpha = 1;
     ctx.drawImage(pond.surface[still], pond.x - camX, pond.y - camY);
     ctx.drawImage(brook.surface[flowing], brook.x - camX, brook.y - camY);
+    // Lily pads, on the water, rocking with the ponds (1.17).
+    ctx.drawImage(pond.pads.frames[still], pond.pads.x - camX, pond.pads.y - camY);
+    ctx.drawImage(brook.pads.frames[still], brook.pads.x - camX, brook.pads.y - camY);
     for (const ring of waterLife.ripples()) {
       ctx.globalAlpha = ring.alpha;
       ctx.drawImage(ring.sprite, ring.x - camX, ring.y - camY);
@@ -837,7 +851,11 @@
           addCabin(things, x, y, lit);
           if (indoors >= 0.5) continue;   // the squirrel is inside, in plain view
         } else {
-          const sprite = art.frames.length === 1 ? art.frames[0] : Scenery.frame(art, effects.lean(prop.x, prop.y, clock), clock);
+          // The windmill's sails turn with the wind, and a leaf pile shows how long since it burst (1.17).
+          const sprite = art.frames.length === 1 ? art.frames[0]
+            : art.turns ? art.frames[effects.sails(art.frames.length)]
+              : prop.pile !== undefined ? art.frames[effects.pileFrame(prop.pile)]
+                : Scenery.frame(art, effects.lean(prop.x, prop.y, clock), clock);
           things.push({ sprite, x, y, depth: prop.y });
         }
         if (art.hides && prop.y > player.y && px > x && px < x + width && py - 8 > y && py - 8 < y + height) {

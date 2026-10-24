@@ -1,8 +1,9 @@
 // Sound: the game's beeps, and the park's own quiet sounds round the squirrel:
 // water babbling and bubbling, the rush of the waterfall, leaves in a gust,
 // jays singing, groundhogs scratching at the dirt, the cabin's fire crackling
-// and its door creaking, ducks quacking and splashes. Everything is made in
-// code with the Web Audio API; nothing is loaded.
+// and its door creaking, ducks quacking and splashes; and since 1.17 frogs
+// croaking, leaf piles bursting, and the windmill's sails swishing round.
+// Everything is made in code with the Web Audio API; nothing is loaded.
 
 const Sound = (() => {
   // Each beep is a few square-wave notes: [frequency, delay, length]. The
@@ -37,6 +38,12 @@ const Sound = (() => {
   // leaping and a duck coming down or taking off splash, softly.
   const QUACK = { level: 0.05, every: [5, 14] };
   const SPLASH = { level: 0.05 };
+  // Frogs croak now and then, as softly as a duck quacks; a leaf pile rustles
+  // once as it bursts; the windmill's sails swish as each sweeps past the
+  // bottom of its turn, and now and then the mill creaks (1.17).
+  const CROAK = { level: 0.12, every: [4, 11] };
+  const RUSTLE_BURST = { level: 0.045 };
+  const MILL = { near: 20, reach: 140, swish: 0.03, creak: 0.045, creakOften: 0.3 };
   const FADE = 0.03;                               // switching on or off takes about three times this
 
   // 1 within `near`, falling to 0 at `reach`, and faster further out.
@@ -54,6 +61,7 @@ const Sound = (() => {
     let parts = null;   // the audio graph, once there is a context
     // Each animal heard lately, and when it may next make a sound.
     let heard = new Map();
+    let lastSweep = null;   // how many quarter turns the windmill's sails had made, last we heard
 
     function build(made) {
       context = made;
@@ -302,6 +310,96 @@ const Sound = (() => {
       for (let i = 0; i < drops; i++) bubble(start + 0.08 + random() * 0.12, volume * 0.8, side);
     }
 
+    // A frog's croak (1.17): two or three quick, low, rattling pulses.
+    function croak(start, volume, side) {
+      const out = panned(side);
+      const pulses = random() < 0.6 ? 2 : 3;
+      const base = 150 + random() * 50;
+      let at = start;
+      for (let i = 0; i < pulses; i++) {
+        const length = 0.05 + random() * 0.025;
+        const oscillator = context.createOscillator();
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(base * (1 + i * 0.08), at);
+        oscillator.frequency.exponentialRampToValueAtTime(base * 0.85, at + length);
+        const filter = context.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 650 + random() * 250;
+        filter.Q.value = 3;
+        const gain = context.createGain();
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.exponentialRampToValueAtTime(CROAK.level * volume, at + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+        oscillator.connect(filter).connect(gain).connect(out);
+        oscillator.start(at);
+        oscillator.stop(at + length + 0.01);
+        at += length + 0.03 + random() * 0.03;
+      }
+    }
+
+    // A leaf pile bursting (1.17): a dry rustle of leaves, in a few quick rushes.
+    function rustleBurst(start, volume, side) {
+      const out = panned(side);
+      let at = start;
+      for (let i = 0; i < 3; i++) {
+        const length = 0.09 + random() * 0.08;
+        const source = context.createBufferSource();
+        source.buffer = parts.noise;
+        const low = context.createBiquadFilter();
+        low.type = 'highpass';
+        low.frequency.value = 1400;
+        const band = context.createBiquadFilter();
+        band.type = 'bandpass';
+        band.frequency.value = 3200 + random() * 1600;
+        band.Q.value = 0.7;
+        const gain = context.createGain();
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.exponentialRampToValueAtTime(RUSTLE_BURST.level * volume * (1 - i * 0.25), at + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+        source.connect(low).connect(band).connect(gain).connect(out);
+        source.start(at, random() * 1.8, length + 0.01);
+        at += length * 0.6;
+      }
+    }
+
+    // The windmill (1.17): a soft whoosh as a sail sweeps down past the bottom
+    // of its turn, and now and then the low creak of its wooden works.
+    function swish(start, volume, side) {
+      const length = 0.32;
+      const source = context.createBufferSource();
+      source.buffer = parts.noise;
+      const filter = context.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(350, start);
+      filter.frequency.linearRampToValueAtTime(900, start + length * 0.5);
+      filter.frequency.linearRampToValueAtTime(400, start + length);
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(MILL.swish * volume, start + length * 0.45);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+      source.connect(filter).connect(gain).connect(panned(side));
+      source.start(start, random() * 1.6, length + 0.01);
+    }
+    function millCreak(start, volume, side) {
+      const length = 0.3;
+      const oscillator = context.createOscillator();
+      oscillator.type = 'sawtooth';
+      oscillator.frequency.setValueAtTime(30, start);
+      oscillator.frequency.linearRampToValueAtTime(44, start + length * 0.5);
+      oscillator.frequency.linearRampToValueAtTime(34, start + length);
+      const filter = context.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 900;
+      filter.Q.value = 3;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(MILL.creak * volume, start + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+      oscillator.connect(filter).connect(gain).connect(panned(side));
+      oscillator.start(start);
+      oscillator.stop(start + length + 0.02);
+    }
+
     // A bubble rising in the water: a soft blip that slides up.
     function bubble(start, volume, side) {
       const length = 0.04 + random() * 0.04;
@@ -333,9 +431,12 @@ const Sound = (() => {
     // `scene.breeze` (0 to 1) how hard the leaves round it are moving; and
     // `scene.voices` the animals up to something: { who, kind, x, y }, kind
     // being 'sitting', 'landing' or 'flying' (jays), 'digging' (groundhogs),
-    // 'duck', 'duck-landing' or 'duck-flying' (mallards), or 'splash' (a fish
-    // leaping, a duck coming down or taking off; heard once); and
-    // `scene.fire` { distance, dx } to the cabin's hearth, if there is one.
+    // 'duck', 'duck-landing' or 'duck-flying' (mallards), 'splash' (a fish
+    // leaping, a duck coming down or taking off, a frog plopping in; heard
+    // once), 'frog' (one sitting), or 'rustle' (a leaf pile bursting, heard
+    // once); `scene.fire` { distance, dx } to the cabin's hearth, if there is
+    // one; and `scene.mill` { distance, dx, turn } to the windmill, with how
+    // far its sails have turned (radians), if there is one.
     function update(dt, scene, now = context ? context.currentTime : 0) {
       if (!parts) return;
       const ahead = now + 0.02;
@@ -357,9 +458,20 @@ const Sound = (() => {
         parts.nextSwell[i] = now + (i < 2 ? 0.05 + random() * 0.12 : 0.1 + random() * 0.2);
         band.swell.gain.setTargetAtTime(i < 2 ? 0.35 + random() * 0.65 : 0.55 + random() * 0.45, now, 0.03);
       });
+      // A sail sweeps past the bottom of the windmill's turn each quarter turn.
+      const sweeps = scene.mill ? Math.floor(scene.mill.turn / (Math.PI / 2)) : null;
+      const swept = sweeps !== null && lastSweep !== null && sweeps > lastSweep;
+      lastSweep = sweeps;
       if (!on) return;
       if (water > 0 && random() < WATER.bubblesPerSecond * water * dt) bubble(ahead, water, sideOf(scene.water.dx));
       if (fire > 0 && random() < FIRE.cracklesPerSecond * fire * dt) crackle(ahead, fire, sideOf(scene.fire.dx));
+      if (swept) {
+        const mill = nearness(scene.mill.distance, MILL.near, MILL.reach);
+        if (mill > 0) {
+          swish(ahead, mill, sideOf(scene.mill.dx));
+          if (random() < MILL.creakOften) millCreak(ahead + 0.05, mill, sideOf(scene.mill.dx));
+        }
+      }
 
       // The animals: a jay sitting nearby sings now and then, one landing calls
       // as it settles, one flying close past may call once; a groundhog
@@ -402,6 +514,15 @@ const Sound = (() => {
           if (random() < 0.4) quack(ahead, volume, side);
         } else if (voice.kind === 'splash' && was.kind === null) {
           if (volume > 0) splash(ahead, volume, side);   // heard once, as it happens
+        } else if (voice.kind === 'frog') {
+          // A frog sitting nearby croaks now and then (1.17).
+          if (was.kind === null) was.next = now + CROAK.every[0] * random() * 1.5;
+          if (volume > 0 && now >= was.next) {
+            croak(ahead, volume, side);
+            was.next = now + CROAK.every[0] + random() * (CROAK.every[1] - CROAK.every[0]);
+          }
+        } else if (voice.kind === 'rustle' && was.kind === null) {
+          if (volume > 0) rustleBurst(ahead, volume, side);   // a leaf pile bursting, heard once (1.17)
         }
         was.kind = voice.kind;
         still.set(voice.who, was);
