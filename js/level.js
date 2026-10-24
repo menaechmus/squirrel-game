@@ -69,6 +69,22 @@ const Level = (() => {
   const PADS = { clusters: [3, 2], each: [3, 5] };
   const PILES = { count: 12, apart: 70, fromAcorns: 16, fromStart: 60 };
 
+  // ---- the hedged field and its meadow (1.18) ----
+  // Added after the landmarks, so again nothing else moves. A thick hawthorn
+  // hedge fences off the far south-west corner: a smooth course from beyond
+  // the west hedge, along and round, to beyond the south hedge, so both its
+  // ends are sealed into the park's own; fitted between the trees there by
+  // drawing it on the park's map first. Two ways in, as distances along it: a
+  // gate in its north side and a gap in its east side, towards the mill.
+  // Inside, a meadow of long grass, where everyone wades at `MEADOW_PACE` and
+  // the route search counts each cell as that much further.
+  const HEDGEROW = {
+    course: [[16, 706], [60, 700], [120, 707], [170, 700], [190, 716], [195, 780], [193, 850], [190, 900], [190, 944]],
+    half: 5, gaps: [[92, 124], [262, 294]], clumpEvery: 5, clumps: ['hedge0', 'hedge1', 'hedge2'],
+  };
+  const FIELD_ACORNS = 5;     // laid again in the meadow: the acorns lying in the open nearest the field
+  const MEADOW_PACE = 0.75;
+
   // ---- the paths ----
   // Two dirt paths, one north to south and one west to east, crossing where
   // the squirrel starts: smooth curves through these points, from beyond one
@@ -218,7 +234,18 @@ const Level = (() => {
     let cabin = null;
     const inHouse = (x, y, pad) => cabin !== null && x > cabin.x - cabin.ends - pad && x < cabin.x + cabin.ends + pad
       && y > cabin.y - cabin.depth - pad && y < cabin.y + pad;
-    const inFeature = (x, y, pad) => inAnyPond(x, y, pad) || onMountain(x, y, pad) || nearStream(x, y, pad) || inHouse(x, y, pad);
+    // The field's hedge (1.18), a chain of strips like the stream's banks, and
+    // its field and meadow: nothing until that step, so all laid out before
+    // it stays where it was.
+    const hedgeStrips = [];
+    let inField = () => false;
+    let inMeadow = () => false;
+    const inHedgerow = (x, y, radius) => hedgeStrips.some((strip) => {
+      if (!nearStrip(strip, x, y, radius)) return false;
+      const near = closestOn(strip, x, y);
+      return Math.hypot(x - near.x, y - near.y) < strip.reach + radius;
+    });
+    const inFeature = (x, y, pad) => inAnyPond(x, y, pad) || onMountain(x, y, pad) || nearStream(x, y, pad) || inHouse(x, y, pad) || inHedgerow(x, y, pad);
 
     // ---- the paths ----
     const paths = PATH_COURSES.map((list) => ({ points: smoothCourse(list.map(([x, y]) => ({ x, y }))), half: PATH_HALF }));
@@ -455,6 +482,19 @@ const Level = (() => {
         creature.x += sideways * (depth + radius);
         creature.y += down * (depth + radius);
       };
+      // Off a strip of the stream or of the field's hedge, square to its line.
+      const offStrip = (strip) => {
+        if (!nearStrip(strip, creature.x, creature.y, radius)) return;
+        const near = closestOn(strip, creature.x, creature.y);
+        const dx = creature.x - near.x;
+        const dy = creature.y - near.y;
+        const reach = strip.reach + radius;
+        if (dx * dx + dy * dy < reach * reach) {
+          const distance = Math.hypot(dx, dy) || 0.01;
+          creature.x = near.x + (dx / distance) * reach;
+          creature.y = near.y + (dy / distance) * reach;
+        }
+      };
       for (let pass = 0; pass < 2; pass++) {
         if (scenery) {
           for (const box of boxes) offBox(box);
@@ -469,20 +509,10 @@ const Level = (() => {
             }
           }
           outOfMountain();
+          for (const strip of hedgeStrips) offStrip(strip);   // the field's hedge (1.18)
         }
         // Off the stream's line, square to it.
-        for (const strip of banks) {
-          if (!nearStrip(strip, creature.x, creature.y, radius)) continue;
-          const near = closestOn(strip, creature.x, creature.y);
-          const dx = creature.x - near.x;
-          const dy = creature.y - near.y;
-          const reach = strip.reach + radius;
-          if (dx * dx + dy * dy < reach * reach) {
-            const distance = Math.hypot(dx, dy) || 0.01;
-            creature.x = near.x + (dx / distance) * reach;
-            creature.y = near.y + (dy / distance) * reach;
-          }
-        }
+        for (const strip of banks) offStrip(strip);
         // A pond blocks a little further down the screen than it is drawn,
         // so a creature's body never overlaps the water.
         for (const each of ponds) outOfEllipse(each.x, each.y + 5, each.a + radius, each.b + radius + 5);
@@ -518,16 +548,18 @@ const Level = (() => {
     function blocked(x, y, radius) {
       return !inPark(x, y, radius) || inAnyPond(x, y, radius + 6)
         || solids.some((solid) => Math.hypot(x - solid.x, y - solid.y) < solid.r + radius)
-        || onMountain(x, y, radius) || inStream(x, y, radius) || inHouse(x, y, radius);
+        || onMountain(x, y, radius) || inStream(x, y, radius) || inHouse(x, y, radius) || inHedgerow(x, y, radius);
     }
     // The same, water aside: somewhere a frog could sit on the bank (1.17).
-    const standsClear = (x, y, radius) => inPark(x, y, radius) && !onMountain(x, y, radius) && !inHouse(x, y, radius)
+    const standsClear = (x, y, radius) => inPark(x, y, radius) && !onMountain(x, y, radius) && !inHouse(x, y, radius) && !inHedgerow(x, y, radius)
       && !solids.some((solid) => Math.hypot(x - solid.x, y - solid.y) < solid.r + radius);
 
     // ---- finding the way ----
     // A cell is open if a creature could stand in its middle with room to spare.
     const COLS = SIZE / CELL;
     const open = new Uint8Array(COLS * COLS);
+    // How much further a step into each cell counts: 1, or more in the long grass of the meadow (1.18).
+    const slowness = new Float32Array(COLS * COLS).fill(1);
     // Work out the cells from column `left` to `right` and row `top` to `bottom`.
     function fillCells(left, right, top, bottom) {
       [left, top] = [Math.max(0, left), Math.max(0, top)];
@@ -537,7 +569,7 @@ const Level = (() => {
           const x = (col + 0.5) * CELL;
           const y = (row + 0.5) * CELL;
           const inside = x > BORDER + CLEARANCE && x < SIZE - BORDER - CLEARANCE && y > BORDER + 10 + CLEARANCE && y < SIZE - BORDER - CLEARANCE;
-          open[col + row * COLS] = inside && !onMountain(x, y, CLEARANCE) && !inStream(x, y, CLEARANCE) && !inHouse(x, y, CLEARANCE)
+          open[col + row * COLS] = inside && !onMountain(x, y, CLEARANCE) && !inStream(x, y, CLEARANCE) && !inHouse(x, y, CLEARANCE) && !inHedgerow(x, y, CLEARANCE)
             && !ponds.some((each) => ((x - each.x) / (each.a + CLEARANCE)) ** 2 + ((y - each.y - 5) / (each.b + CLEARANCE + 5)) ** 2 < 1) ? 1 : 0;
         }
       }
@@ -639,8 +671,9 @@ const Level = (() => {
           const next = c + r * COLS;
           // No cutting a corner past something solid.
           if (!open[next] || (dx && dy && (!open[c + row * COLS] || !open[col + r * COLS]))) continue;
-          if (dist[cell] + cost < dist[next]) {
-            dist[next] = dist[cell] + cost;
+          const step = cost * slowness[next];
+          if (dist[cell] + step < dist[next]) {
+            dist[next] = dist[cell] + step;
             rank[next] = dist[next] + ahead(next);
             from[next] = cell;
             push(next);
@@ -1013,6 +1046,142 @@ const Level = (() => {
     layAgain(later, madeRoom, added.acorns);
     props.sort((a, b) => a.y - b.y);
 
+    // ---- the hedged field and its meadow (1.18) ----
+    // After the landmarks, with random numbers of its own. The hedge's line is
+    // a smooth curve from beyond the west hedge to beyond the south one, solid
+    // as a chain of short strips (like the stream's banks) but for the gate and
+    // the gap. Whatever stands on its line, or in the meadow but for the trees
+    // and rocks there (they stand on in the long grass), is cleared; the five
+    // acorns lying in the open nearest the field are laid again in the meadow,
+    // each in its own place in the list; then any acorn the hedge crowds is laid again.
+    const fieldRandom = seededRandom(SEED + 118);
+    const fieldTook = { props: [], acorns: [] };
+    const hedgeLine = smoothCourse(HEDGEROW.course.map(([x, y]) => ({ x, y })));
+    const inAGap = (s) => HEDGEROW.gaps.some(([from, to]) => s >= from && s <= to);
+    for (let i = 0; i < hedgeLine.length - 1; i += 3) {
+      const a = hedgeLine[i];
+      const b = hedgeLine[Math.min(hedgeLine.length - 1, i + 3)];
+      if (inAGap((a.s + b.s) / 2)) continue;
+      const reach = HEDGEROW.half + 0.5;
+      hedgeStrips.push({ a, b, reach, left: Math.min(a.x, b.x) - reach, right: Math.max(a.x, b.x) + reach, top: Math.min(a.y, b.y) - reach, bottom: Math.max(a.y, b.y) + reach });
+    }
+    // The field, inside the hedge's line and the park's corner, as a mask of
+    // the park's pixels over a box round it, filled row by row; the meadow is
+    // the field less a strip along the hedge (its half-width and a pixel more).
+    const fieldBox = { left: 0, top: Math.floor(Math.min(...hedgeLine.map((p) => p.y))) - 2, right: Math.ceil(Math.max(...hedgeLine.map((p) => p.x))) + 2, bottom: SIZE - 1 };
+    const boxW = fieldBox.right - fieldBox.left + 1;
+    const boxH = fieldBox.bottom - fieldBox.top + 1;
+    const field = new Uint8Array(boxW * boxH);
+    const outline = hedgeLine.filter((point, i) => i % 3 === 0 || i === hedgeLine.length - 1).concat([{ x: -20, y: SIZE + 20 }, { x: -20, y: hedgeLine[0].y }]);
+    for (let row = 0; row < boxH; row++) {
+      const y = fieldBox.top + row + 0.5;
+      const crossings = [];
+      for (let i = 0; i < outline.length; i++) {
+        const a = outline[i];
+        const b = outline[(i + 1) % outline.length];
+        if ((a.y <= y) !== (b.y <= y)) crossings.push(a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x));
+      }
+      crossings.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < crossings.length; k += 2) {
+        for (let x = Math.max(fieldBox.left, Math.ceil(crossings[k] - 0.5)); x <= Math.min(fieldBox.right, Math.floor(crossings[k + 1] - 0.5)); x++) field[(x - fieldBox.left) + row * boxW] = 1;
+      }
+    }
+    const meadowMask = field.slice();
+    for (const p of hedgeLine.filter((point, i) => i % 2 === 0)) {
+      const r = HEDGEROW.half + 1;
+      for (let y = Math.floor(p.y - r); y <= Math.ceil(p.y + r); y++) {
+        for (let x = Math.floor(p.x - r); x <= Math.ceil(p.x + r); x++) {
+          if (x < fieldBox.left || x > fieldBox.right || y < fieldBox.top || y > fieldBox.bottom) continue;
+          if (Math.hypot(x + 0.5 - p.x, y + 0.5 - p.y) < r) meadowMask[(x - fieldBox.left) + (y - fieldBox.top) * boxW] = 0;
+        }
+      }
+    }
+    const maskAt = (mask, x, y) => {
+      const col = Math.floor(x) - fieldBox.left;
+      const row = Math.floor(y) - fieldBox.top;
+      return col >= 0 && row >= 0 && col < boxW && row < boxH && mask[col + row * boxW] === 1;
+    };
+    inField = (x, y) => maskAt(field, x, y);
+    inMeadow = (x, y) => x >= BORDER && y >= BORDER && x < SIZE - BORDER && y < SIZE - BORDER && maskAt(meadowMask, x, y);
+    // The meadow's box in the park, for whoever draws it.
+    const meadowBox = { left: SIZE, top: SIZE, right: 0, bottom: 0 };
+    for (let row = 0; row < boxH; row++) {
+      const y = fieldBox.top + row;
+      if (y < BORDER || y >= SIZE - BORDER) continue;
+      for (let col = 0; col < boxW; col++) {
+        const x = fieldBox.left + col;
+        if (!meadowMask[col + row * boxW] || x < BORDER) continue;
+        if (x < meadowBox.left) meadowBox.left = x;
+        if (x > meadowBox.right) meadowBox.right = x;
+        if (y < meadowBox.top) meadowBox.top = y;
+        if (y > meadowBox.bottom) meadowBox.bottom = y;
+      }
+    }
+
+    // What the hedge and the meadow take: anything solid within 3 px of the
+    // hedge (trees stand close by a hedgerow), and anything else on its line or
+    // in the meadow (flowers, mushrooms, tufts, a leaf pile); not the trees and
+    // rocks in the field, which stand on in the long grass.
+    const fieldMade = new Set();
+    clearAway((prop) => {
+      const own = solids.filter((solid) => solid.owner === prop);
+      if (own.length) return own.some((solid) => inHedgerow(solid.x, solid.y, solid.r + 3));
+      return inHedgerow(prop.x, prop.y, prop.sprite === 'tuft' ? 4 : 8) || inMeadow(prop.x, prop.y) || inMeadow(prop.x, prop.y - 4);
+    }, fieldMade, fieldTook.props);
+    // The leaf piles left, numbered again.
+    pileSpots.length = 0;
+    for (const prop of props.filter((each) => each.sprite === 'leafPile')) {
+      prop.pile = pileSpots.length;
+      pileSpots.push({ x: prop.x, y: prop.y });
+    }
+    // The hedge: a clump every few pixels along its line inside the park, but
+    // for the gate and the gap; an open gate in the first, its posts either side.
+    const pointAt = (s) => hedgeLine.find((point) => point.s >= s) || hedgeLine[hedgeLine.length - 1];
+    for (let s = 1; s < hedgeLine[hedgeLine.length - 1].s; s += HEDGEROW.clumpEvery) {
+      if (inAGap(s)) continue;
+      const p = pointAt(s);
+      if (p.x < BORDER - 6 || p.y > SIZE - BORDER + 6) continue;   // in the park's own hedge
+      props.push({ sprite: HEDGEROW.clumps[Math.floor(fieldRandom() * HEDGEROW.clumps.length)], x: Math.round(p.x), y: Math.round(p.y + HEDGEROW.half - 1) });
+    }
+    const gateAt = pointAt((HEDGEROW.gaps[0][0] + HEDGEROW.gaps[0][1]) / 2);
+    props.push({ sprite: 'gate', x: Math.round(gateAt.x), y: Math.round(gateAt.y + HEDGEROW.half) });
+
+    // The route grid over the field and round it, with the hedge in it and
+    // the meadow slower going; then what can be reached from the start.
+    const lastCol = cellAt(fieldBox.right) + 6;
+    const firstRow = cellAt(fieldBox.top) - 6;
+    for (let row = Math.max(0, firstRow); row < COLS; row++) {
+      for (let col = 0; col <= Math.min(COLS - 1, lastCol); col++) {
+        slowness[col + row * COLS] = inMeadow((col + 0.5) * CELL, (row + 0.5) * CELL) ? 1 / MEADOW_PACE : 1;
+      }
+    }
+    fillCells(0, lastCol, firstRow, COLS - 1);
+    reachable = reachableFrom(spawn);
+
+    // The five acorns lying in the open nearest the field (outside it), laid
+    // again in its meadow, each in its own place in the list. Those tucked
+    // beside a trunk or a bush stay, so there are as many of those as ever.
+    const fromTheField = (acorn) => Math.min(...hedgeLine.map((p) => Math.hypot(acorn.x - p.x, acorn.y - p.y)));
+    const nearest = acorns.map((acorn, index) => ({ acorn, index, away: fromTheField(acorn) }))
+      .filter((each) => !inField(each.acorn.x, each.acorn.y) && !tuckedBy.has(each.acorn)).sort((a, b) => a.away - b.away).slice(0, FIELD_ACORNS)
+      .sort((a, b) => b.index - a.index);
+    const vacated = [];
+    for (const { acorn, index } of nearest) {
+      fieldTook.acorns.push([acorn.x, acorn.y]);
+      acorns.splice(index, 1);
+      vacated.unshift(index);
+    }
+    const kept = acorns.length;
+    for (let attempt = 0; attempt < 3000 && acorns.length < kept + vacated.length; attempt++) {
+      const x = Math.round(meadowBox.left + fieldRandom() * (meadowBox.right - meadowBox.left));
+      const y = Math.round(meadowBox.top + fieldRandom() * (meadowBox.bottom - meadowBox.top));
+      if (inMeadow(x, y) && inMeadow(x, y - 10)) tryAcorn(x, y);
+    }
+    acorns.splice(kept).forEach((acorn, k) => acorns.splice(vacated[k], 0, acorn));
+    // Any other acorn the hedge now crowds, laid again elsewhere.
+    layAgain(fieldRandom, fieldMade, fieldTook.acorns);
+    props.sort((a, b) => a.y - b.y);
+
     const landmarkAt = (sprite) => LANDMARKS.filter((one) => one.sprite === sprite).map(({ x, y }) => ({ x, y }));
     return {
       size: SIZE, tile: TILE, border: BORDER, spawn, pond, ponds, streams, mountain, falls, paths, logs, props, acorns, cabin,
@@ -1023,10 +1192,13 @@ const Level = (() => {
       // number in this list as `pile`).
       mill: landmarkAt('mill')[0], well: landmarkAt('well')[0], signpost: landmarkAt('signpost')[0], birdBath: landmarkAt('birdBath')[0],
       benches: landmarkAt('bench'), pads, piles: pileSpots, reeds: reedSpots,
+      // The hedged field (1.18): where its meadow and field are, how fast everyone
+      // goes in the long grass, the hedge's line and its gaps, the meadow's box.
+      inMeadow, inField, meadowPace: MEADOW_PACE, hedgerow: { line: hedgeLine, gaps: HEDGEROW.gaps, half: HEDGEROW.half }, meadow: meadowBox,
       // For tests: the copses, the cabin's walls, what the ponds took as they
       // grew and the landmarks took as they went up, and the route grid.
       copses: copses.map((copse) => ({ x: copse.x, y: copse.y, radius: copse.radius, trees: copse.trees.length })),
-      boxes, flooded, added,
+      boxes, flooded, added, fieldTook,
       grid: { cell: CELL, cols: COLS, open, isOpen: (x, y) => open[cellOf(x, y)] === 1 },
     };
   }

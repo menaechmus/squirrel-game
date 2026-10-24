@@ -10,7 +10,7 @@ const Hud = (() => {
 
   // A miniature of the park: hedge, grass, the paths, the ponds and the stream
   // with its bridges, the mountain at the east edge, the log cabin's roof, the
-  // windmill and the well (1.17), and tree tops.
+  // windmill and the well (1.17), the hedged field and its meadow (1.18), and tree tops.
   function buildMinimap(level) {
     const c = Sprites.canvas(MINIMAP_SIZE, MINIMAP_SIZE);
     const g = c.getContext('2d');
@@ -36,6 +36,11 @@ const Hud = (() => {
     const onCabin = (x, y) => cabin && Math.abs(x - cabin.x) < cabin.ends && y > cabin.y - cabin.depth - 12 && y < cabin.y - 6;
     const stoneBuilt = [level.mill, level.well].filter(Boolean);
     const onStone = (x, y) => stoneBuilt.some((one) => Math.abs(x - one.x) < 13 && y > one.y - 24 && y < one.y);
+    // The field's hedge, broken at its gate and its gap, and its meadow.
+    const hedgerow = level.hedgerow;
+    const hedgePoints = hedgerow ? hedgerow.line.filter((point, i) => i % 3 === 0 && !hedgerow.gaps.some(([from, to]) => point.s >= from && point.s <= to)) : [];
+    const onHedgerow = (x, y) => hedgePoints.some((point) => Math.abs(x - point.x) < cell / 2 && Math.abs(y - point.y) < cell / 2);
+    const inMeadow = level.inMeadow || (() => false);
     for (let my = 0; my < MINIMAP_SIZE; my++) {
       for (let mx = 0; mx < MINIMAP_SIZE; mx++) {
         const x = (mx + 0.5) * cell;
@@ -53,10 +58,10 @@ const Hud = (() => {
           g.fillStyle = '#4a90d9';
         } else if (onPath(x, y)) {
           g.fillStyle = '#b89a68';
-        } else if (inHedge(x, y)) {
+        } else if (inHedge(x, y) || onHedgerow(x, y)) {
           g.fillStyle = '#1f5226';
         } else {
-          g.fillStyle = treeCells.has(mx + my * MINIMAP_SIZE) ? '#2d7a37' : '#5cab46';
+          g.fillStyle = treeCells.has(mx + my * MINIMAP_SIZE) ? '#2d7a37' : inMeadow(x, y) ? '#8ab84e' : '#5cab46';
         }
         g.fillRect(mx, my, 1, 1);
       }

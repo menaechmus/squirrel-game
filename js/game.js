@@ -52,6 +52,7 @@
   const ground = Scenery.buildGround(level);
   const pond = Scenery.buildPond(level);
   const brook = Scenery.buildBrook(level);   // the stream, the second pond and the log bridges
+  const meadow = Scenery.buildMeadow(level);   // the hedged field's long grass, in rows (1.18)
   const miniature = Hud.buildMinimap(level);
   const effects = Effects.create(level);
   const total = level.acorns.length;
@@ -185,6 +186,7 @@
       voices: rivals.voices().concat(waterLife.voices(), rustles),
       fire: { distance: Math.hypot(cabin.hearth.x - player.x, cabin.hearth.y - player.y), dx: cabin.hearth.x - player.x },
       mill: mill && { distance: Math.hypot(mill.x - player.x, mill.y - 30 - player.y), dx: mill.x - player.x, turn: effects.sailTurn() },
+      wading: state === 'playing' && player.moving && level.inMeadow(player.x, player.y),   // through the long grass (1.18)
     });
   }
 
@@ -685,8 +687,10 @@
     const move = auto ? autoVector(dt) : Input.vector();
     player.moving = Boolean(move.x || move.y);
     if (player.moving) {
-      player.x += move.x * SPEED * dt;
-      player.y += move.y * SPEED * dt;
+      // Wading through the meadow's long grass (1.18), it goes slower.
+      const pace = level.inMeadow(player.x, player.y) ? level.meadowPace : 1;
+      player.x += move.x * SPEED * pace * dt;
+      player.y += move.y * SPEED * pace * dt;
       player.hop += dt;
       player.idle = 0;
       player.sniffRound = -1;
@@ -862,6 +866,13 @@
           behindTree = true;
         }
       }
+    }
+    // The meadow's long grass, a row at a time, each in front of what stands behind it (1.18).
+    for (const row of meadow.rows) {
+      const sprite = row.frames[Math.max(0, Math.min(2, Math.round(effects.lean(row.x + row.frames[0].width / 2, row.y, clock))))];
+      const x = row.x - camX;
+      const y = row.y - sprite.height + 1 - camY;
+      if (x < viewW && y < viewH && x + sprite.width > 0 && y + sprite.height > 0) things.push({ sprite, x, y, depth: row.y + 0.5 });
     }
     for (const acorn of acorns) {
       const bob = Math.round(Math.sin(clock * 4 + acorn.phase) * 1.5);

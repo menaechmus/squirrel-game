@@ -24,6 +24,7 @@ const Scenery = (() => {
     basalt: ['#b8bcc4', '#9096a0', '#6e7480', '#525864', '#3c404a'],
   };
   const GRASS = ['#66b54c', '#5cab46', '#539f41', '#4a933b'];
+  const MEADOW_GROUND = ['#7aa846', '#6e9c40', '#62903a', '#568534'];   // under the meadow's long grass (1.18)
   const DIRT = ['#dcc391', '#cdae78', '#bd9a64', '#a6834f', '#8c6c3f'];
   const HEDGE = ['#3f9a3f', '#2f7d36', '#2a6e33', '#1f5226'];
   const OUTLINE = { leaf: '#143a1d', autumn: '#5a1d10', bark: '#2b1d16', birch: '#5d5648', stone: '#2b2b33', sand: '#3a2e20' };
@@ -1351,6 +1352,117 @@ const Scenery = (() => {
     return { x: box.x, y: box.y, frames };
   }
 
+  // ---- the hedged field and its meadow (1.18) ----
+
+  // A clump of the field's hawthorn hedge: a tall, dense knot of small dark
+  // leaves, lit from the top left, with a few red haws. The hedge is a row of
+  // these, close together, each sorted by depth like any other prop, so a
+  // creature behind it is hidden and one in front is not.
+  const HAWTHORN = ['#5aa046', '#3f8a3a', '#2f7d36', '#2a6e33', '#1f5226'];
+  function hedgeClump(seed) {
+    const rand = seededRandom(seed);
+    const w = 16;
+    const h = 15;
+    const c = canvas(w, h);
+    const g = c.getContext('2d');
+    canopy(g, w, h, 8, 7.5, 7.2, 6.6, HAWTHORN, OUTLINE.leaf, rand);
+    for (let i = 0; i < 4; i++) {
+      const angle = rand() * TAU;
+      const reach = 0.3 + rand() * 0.45;
+      g.fillStyle = i % 2 ? '#c42a2a' : '#e04838';
+      g.fillRect(Math.round(8 + Math.cos(angle) * 6 * reach), Math.round(7.5 + Math.sin(angle) * 5 * reach), 1, 1);
+    }
+    return [c];
+  }
+
+  // The field's gate, standing open: two posts either side of the gap, and the
+  // gate itself (five rails, a stile at each end and a brace) swung back flat
+  // against the hedge to the west of it. Drawn from the middle of the gap,
+  // `gap` pixels wide between the posts.
+  function openGate(gap) {
+    const leaf = 16;
+    const w = gap + 2 * (leaf + 4);
+    const h = 14;
+    const cx = w >> 1;
+    const west = cx - (gap >> 1) - 2;   // the west post's first column
+    const east = cx + (gap >> 1);       // and the east post's
+    return [pixelCanvas(w, h, (x, y) => {
+      if ((x === west || x === west + 1 || x === east || x === east + 1) && y >= 1) {
+        return y === 1 ? OUTLINE.bark : tone(PLANKS, x === west || x === east ? 0.3 : 0.65, x, y, false);
+      }
+      // The gate, from the west post back along the hedge.
+      const along = west - 1 - x;
+      if (along < 0 || along >= leaf || y < 3 || y > 11) return null;
+      const rail = (y - 3) % 2 === 0;
+      const stile = along === 0 || along === leaf - 1;
+      const brace = Math.abs((y - 3) - ((leaf - 1 - along) * 8) / (leaf - 1)) < 0.6;
+      if (!rail && !stile && !brace) return null;
+      return tone(PLANKS, rail ? 0.2 : 0.45, x, y, false);
+    })];
+  }
+
+  // The meadow (1.18): long grass and wildflowers in rows two pixels apart
+  // down the hedged field, each row a picture of its blades in three frames,
+  // as the wind leans on them. The game sorts each row by depth with
+  // everything else, so the rows in front of a creature hide all but its head,
+  // and all of an acorn but its cap. Each row's bottom is on its `y`, its left edge at `x`.
+  const MEADOW_GRASS = ['#5f8f36', '#7aa846', '#93bc52', '#b4c860'];
+  const MEADOW_FLOWERS = ['#e04030', '#d83a2a', '#4a7ae0', '#f4f4ee', '#f0d040'];
+  // Blades 9 or 10 pixels tall in rows two pixels apart: whatever stands among
+  // them shows from about 8 pixels up, a squirrel's chin or an acorn's cap,
+  // wherever it stands between two rows.
+  const MEADOW_ROW = { apart: 2, shortest: 9, tallest: 10, gaps: 0.3, flowers: 0.009, seeds: 0.06 };
+  function buildMeadow(level) {
+    const meadow = level.meadow;
+    if (!meadow) return { rows: [] };
+    const rand = seededRandom(118);
+    const rows = [];
+    const h = MEADOW_ROW.tallest + 2;   // room for a flower on the tallest blade
+    for (let y = meadow.top + MEADOW_ROW.apart; y <= meadow.bottom; y += MEADOW_ROW.apart) {
+      let from = null;
+      let to = null;
+      for (let x = meadow.left; x <= meadow.right; x++) {
+        if (!level.inMeadow(x, y)) continue;
+        if (from === null) from = x;
+        to = x;
+      }
+      if (from === null) continue;
+      const w = to - from + 4;   // room for the blades to lean right
+      const blades = [];
+      for (let x = 0; x <= to - from; x++) {
+        if (!level.inMeadow(from + x, y) || rand() < MEADOW_ROW.gaps) continue;
+        const height = MEADOW_ROW.shortest + Math.floor(rand() * (MEADOW_ROW.tallest - MEADOW_ROW.shortest + 1));
+        const flower = rand() < MEADOW_ROW.flowers ? MEADOW_FLOWERS[Math.floor(rand() * MEADOW_FLOWERS.length)] : null;
+        blades.push({ x, height, flower, seed: !flower && rand() < MEADOW_ROW.seeds, shade: rand() < 0.5 ? 1 : 2 });
+      }
+      // Painted into a list of colours first, then made into a picture in one go:
+      // there are over a hundred rows, in three frames each.
+      const frames = [0, 1, 2].map((lean) => {
+        const colors = new Array(w * h).fill(null);
+        const put = (x, y, color) => {
+          if (x >= 0 && x < w && y >= 0 && y < h) colors[y * w + x] = color;
+        };
+        for (const blade of blades) {
+          for (let k = 0; k < blade.height; k++) {
+            const up = k / (blade.height - 1);
+            const tip = k === blade.height - 1;
+            put(blade.x + Math.round(lean * up ** 1.5), h - 1 - k,
+              k < 2 ? MEADOW_GRASS[0] : tip ? (blade.seed ? '#d8c890' : MEADOW_GRASS[3]) : MEADOW_GRASS[blade.shade]);
+          }
+          if (blade.flower) {
+            const x = blade.x + lean;
+            const top = h - blade.height - 1;
+            for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) put(x + dx, top + dy, blade.flower);
+            put(x, top, blade.flower === '#f4f4ee' ? '#f0d040' : '#2b1d16');
+          }
+        }
+        return pixelCanvas(w, h, (x, y) => colors[y * w + x]);
+      });
+      rows.push({ x: from, y, frames });
+    }
+    return { rows };
+  }
+
   // ---- the catalogue ----
 
   // Where a bird could sit on a tree: the middle of the top row of a frame, as
@@ -1458,6 +1570,13 @@ const Scenery = (() => {
   define('signpost', [signpost()], { shadow: [8, 3] });
   define('bench', [parkBench()], { shadow: [24, 6] });
   define('birdBath', birdBath(), { perch: true, glints: true, shadow: [14, 4] });
+  // The field's hedge and its gate (1.18). A clump `hides` what is behind it,
+  // like a tree top, so the squirrel shows faintly through and nothing for
+  // show lands or comes up there.
+  define('hedge0', hedgeClump(701), { hides: true, shadow: [14, 5] });
+  define('hedge1', hedgeClump(702), { hides: true, shadow: [14, 5] });
+  define('hedge2', hedgeClump(703), { hides: true, shadow: [14, 5] });
+  define('gate', openGate(18), {});
 
   // Which frame of a prop shows for a given wind strength.
   function frameIndex(art, lean) {
@@ -1528,6 +1647,8 @@ const Scenery = (() => {
       return tone(DIRT, 0.12 + across * across * 0.6 + (smoothNoise(x, y, 4, 94) - 0.5) * 0.4 + (inHedge ? 0.3 : 0), x, y);
     };
 
+    // The meadow's ground (1.18), under its long grass: deeper, yellower green, mottled.
+    const meadowAt = level.inMeadow || (() => false);
     const c = pixelCanvas(size, size, (x, y) => {
       const inside = x >= border && x < inner && y >= border && y < inner;
       const fromPath = pathAway[x + y * size];
@@ -1535,6 +1656,9 @@ const Scenery = (() => {
         const half = paths[0].half + (smoothNoise(x, y, 6, 91) - 0.5) * 2.4;
         if (fromPath < half && !(inside && fromPath > half - 1.6 && hash(x, y, 92) < 0.45)) return dirt(x, y, fromPath / half, !inside);
         if (!inside && fromPath < half + 1.5) return OUTLINE.leaf;   // where the path cuts through the hedge
+      }
+      if (inside && meadowAt(x, y)) {
+        return tone(MEADOW_GROUND, smoothNoise(x, y, 5, 95) * 0.8 + hash(x, y, 96) * 0.3, x, y);
       }
       if (inside) {
         return tone(GRASS, (patches[(x >> 1) + (y >> 1) * cells] - 0.25) * 2, x, y, false);
@@ -1840,6 +1964,7 @@ const Scenery = (() => {
     buildGround,
     buildPond,
     buildBrook,
+    buildMeadow,
     clouds: [cloud(1, 250, 120), cloud(2, 200, 110), cloud(3, 280, 140), cloud(4, 220, 100), cloud(5, 180, 120)],
   };
 })();

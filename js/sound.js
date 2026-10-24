@@ -44,6 +44,8 @@ const Sound = (() => {
   const CROAK = { level: 0.12, every: [4, 11] };
   const RUSTLE_BURST = { level: 0.045 };
   const MILL = { near: 20, reach: 140, swish: 0.03, creak: 0.045, creakOften: 0.3 };
+  // Wading through the meadow's long grass (1.18): a soft swish every stride or so.
+  const WADE = { level: 0.03, every: [0.26, 0.4] };
   const FADE = 0.03;                               // switching on or off takes about three times this
 
   // 1 within `near`, falling to 0 at `reach`, and faster further out.
@@ -62,6 +64,7 @@ const Sound = (() => {
     // Each animal heard lately, and when it may next make a sound.
     let heard = new Map();
     let lastSweep = null;   // how many quarter turns the windmill's sails had made, last we heard
+    let nextWade = 0;       // when the next swish of the long grass may come
 
     function build(made) {
       context = made;
@@ -400,6 +403,23 @@ const Sound = (() => {
       oscillator.stop(start + length + 0.02);
     }
 
+    // The long grass brushing past (1.18): a soft, airy swish.
+    function grassSwish(start) {
+      const length = 0.16 + random() * 0.08;
+      const source = context.createBufferSource();
+      source.buffer = parts.noise;
+      const filter = context.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 2400 + random() * 1600;
+      filter.Q.value = 0.8;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(WADE.level, start + length * 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+      source.connect(filter).connect(gain).connect(parts.master);
+      source.start(start, random() * 1.7, length + 0.01);
+    }
+
     // A bubble rising in the water: a soft blip that slides up.
     function bubble(start, volume, side) {
       const length = 0.04 + random() * 0.04;
@@ -435,8 +455,9 @@ const Sound = (() => {
     // leaping, a duck coming down or taking off, a frog plopping in; heard
     // once), 'frog' (one sitting), or 'rustle' (a leaf pile bursting, heard
     // once); `scene.fire` { distance, dx } to the cabin's hearth, if there is
-    // one; and `scene.mill` { distance, dx, turn } to the windmill, with how
-    // far its sails have turned (radians), if there is one.
+    // one; `scene.mill` { distance, dx, turn } to the windmill, with how far
+    // its sails have turned (radians), if there is one; and `scene.wading`,
+    // whether the squirrel is moving through the meadow's long grass (1.18).
     function update(dt, scene, now = context ? context.currentTime : 0) {
       if (!parts) return;
       const ahead = now + 0.02;
@@ -465,6 +486,10 @@ const Sound = (() => {
       if (!on) return;
       if (water > 0 && random() < WATER.bubblesPerSecond * water * dt) bubble(ahead, water, sideOf(scene.water.dx));
       if (fire > 0 && random() < FIRE.cracklesPerSecond * fire * dt) crackle(ahead, fire, sideOf(scene.fire.dx));
+      if (scene.wading && now >= nextWade) {
+        grassSwish(ahead);
+        nextWade = now + WADE.every[0] + random() * (WADE.every[1] - WADE.every[0]);
+      }
       if (swept) {
         const mill = nearness(scene.mill.distance, MILL.near, MILL.reach);
         if (mill > 0) {

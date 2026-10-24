@@ -136,6 +136,8 @@ const Rivals = (() => {
     });
     const underTreeTop = (x, y, depth = y) => canopies.some((tree) => tree.y > depth
       && y < tree.y && y > tree.y - tree.height - 4 && Math.abs(x - tree.x) < tree.half + 6);
+    // The hedged field's meadow (1.18): long grass, slow going, where nothing comes up or lands.
+    const inLongGrass = (x, y) => Boolean(level.inMeadow && level.inMeadow(x, y));
 
     // Tree tops a jay can sit on: where its feet go (x, and z above the tree's
     // base at y) when there is no wind. One hidden by a nearer tree is left out.
@@ -368,7 +370,7 @@ const Rivals = (() => {
     // open ground, with a clear run from `door`, where it steps out, to `grab`,
     // where it picks the acorn up.
     function holeSpots(acorn) {
-      const clear = (x, y, radius) => !level.blocked(x, y, radius) && !underTreeTop(x, y);
+      const clear = (x, y, radius) => !level.blocked(x, y, radius) && !underTreeTop(x, y) && !inLongGrass(x, y);
       return HOLE_OFFSETS
         .map(([dx, dy]) => ({
           x: acorn.x + dx, y: acorn.y + dy,
@@ -518,8 +520,10 @@ const Rivals = (() => {
     }
 
     function step(squirrel, stepX, stepY, speed, dt) {
-      squirrel.x += stepX * speed * dt;
-      squirrel.y += stepY * speed * dt;
+      // Wading through the meadow's long grass (1.18), it goes slower.
+      const pace = inLongGrass(squirrel.x, squirrel.y) ? level.meadowPace : 1;
+      squirrel.x += stepX * speed * pace * dt;
+      squirrel.y += stepY * speed * pace * dt;
       level.pushOut(squirrel, 4);
       squirrel.moving = true;
       squirrel.idle = 0;
@@ -656,7 +660,7 @@ const Rivals = (() => {
     // everybody else. `tuning` says how far from the player and the acorns.
     function quietSpot(spot, soon, tuning) {
       if (spot.x < soon.x + 12 || spot.x > soon.x + soon.w - 12 || spot.y < soon.y + 26 || spot.y > soon.y + soon.h - 10) return false;
-      if (level.blocked(spot.x, spot.y, 8) || underTreeTop(spot.x, spot.y) || near(player, spot, tuning.clearOfPlayer)) return false;
+      if (level.blocked(spot.x, spot.y, 8) || underTreeTop(spot.x, spot.y) || inLongGrass(spot.x, spot.y) || near(player, spot, tuning.clearOfPlayer)) return false;
       if (world.acorns().some((acorn) => near(acorn, spot, tuning.clearOfAcorns))) return false;
       if (holes.some((other) => near(other, spot, 24)) || visitors.some((other) => near(other, spot, 40))) return false;
       if (hog.state !== 'hidden' && near(hog.home, spot, 40)) return false;
